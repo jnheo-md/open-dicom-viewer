@@ -1,0 +1,36 @@
+# Build artifacts
+.build/
+build/
+dist/
+*.app
+
+# Dependencies (rebuilt via scripts/setup_native_deps.sh)
+temp_build/
+
+# Python (legacy)
+.venv/
+__pycache__/
+*.pyc
+*.spec
+
+# Debug tools
+debug_tool
+debug_main.swift
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
+.claude/

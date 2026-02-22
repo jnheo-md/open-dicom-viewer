@@ -1,0 +1,14 @@
+prefix="/Volumes/eDrive/LocalDev/macomviewer/libs/dcmtk"
+exec_prefix="${prefix}"
+libdir="/Volumes/eDrive/LocalDev/macomviewer/libs/dcmtk/lib"
+includedir="${prefix}/include/"
+
+Name: DCMTK
+Description: DICOM Toolkit (DCMTK)
+URL: https://dcmtk.org
+Version: 3.6.8
+Requires: 
+Requires.private:  libopenjp2 sndfile zlib
+Cflags: -I"${includedir}"
+Libs: -L"${libdir}"  -lofstd -loflog -loficonv -ldcmdata -li2d -ldcmxml -ldcmimgle -ldcmimage -ldcmjpeg -lijg8 -lijg12 -lijg16 -ldcmjpls -ldcmtkcharls -ldcmtls -ldcmnet -ldcmsr -lcmr -ldcmdsig -ldcmwlm -ldcmqrdb -ldcmpstat -ldcmrt -ldcmiod -ldcmfg -ldcmseg -ldcmtract -ldcmpmap -ldcmect
+Libs.private: -L"${libdir}" 
