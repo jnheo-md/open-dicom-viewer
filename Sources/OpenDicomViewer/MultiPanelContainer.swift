@@ -153,30 +153,34 @@ struct PanelView: View {
                 .zIndex(5)
             }
 
-            // Group selection button (top-right, multi-panel only)
-            if model.panels.count > 1 && panel.seriesIndex >= 0 {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            model.toggleGroupSelection(for: panel)
-                        }) {
-                            Image(systemName: panel.isGroupSelected ? "square.stack.3d.up.fill" : "square.stack.3d.up.slash")
-                                .font(.system(size: 12))
-                                .foregroundStyle(panel.isGroupSelected ? .orange : .secondary)
-                                .frame(width: 24, height: 24)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(panel.isGroupSelected ? Color.orange.opacity(0.2) : Color.black.opacity(0.4))
-                                )
+            // Shift-overlay for group selection (multi-panel only)
+            if model.isShiftHeld && model.panels.count > 1 {
+                ZStack {
+                    if panel.isGroupSelected {
+                        Color.orange.opacity(0.25)
+                        VStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.orange)
+                            Text("Selected")
+                                .font(.headline)
+                                .foregroundStyle(.orange)
                         }
-                        .buttonStyle(.plain)
-                        .help(panel.isGroupSelected ? "Remove from scroll group (Shift+Click or G)" : "Add to scroll group (Shift+Click or G)")
-                        .padding(6)
+                    } else {
+                        Color.black.opacity(0.5)
+                        VStack(spacing: 8) {
+                            Image(systemName: "hand.tap")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.white.opacity(0.7))
+                            Text("Click to select for\nsimultaneous scrolling")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                        }
                     }
-                    Spacer()
                 }
-                .zIndex(6)
+                .allowsHitTesting(false)
+                .zIndex(500)
             }
 
             // Cross-reference lines overlay
@@ -534,20 +538,40 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         override var acceptsFirstResponder: Bool { true }
 
         func updateROICursor() {
-            let tool = model?.activeTool ?? .pan
-            let wantsCrosshair: Bool
+            let tool = model?.activeTool ?? .select
+
+            let desiredCursor: NSCursor
             switch tool {
+            case .select:
+                desiredCursor = .arrow
+            case .pan:
+                desiredCursor = .openHand
+            case .windowLevel:
+                desiredCursor = .resizeUpDown
+            case .zoom:
+                desiredCursor = .crosshair
             case .roiWL, .roiStats, .ruler, .angle:
-                wantsCrosshair = true
-            default:
-                wantsCrosshair = panel?.isROIMode == true
+                desiredCursor = .crosshair
+            case .eraser:
+                desiredCursor = .disappearingItem
             }
-            if wantsCrosshair && !isCrosshairCursorActive {
-                NSCursor.crosshair.push()
+
+            if tool == .select {
+                // Default arrow cursor — pop any custom cursor
+                if isCrosshairCursorActive {
+                    NSCursor.pop()
+                    isCrosshairCursorActive = false
+                }
+                return
+            }
+
+            if !isCrosshairCursorActive {
+                desiredCursor.push()
                 isCrosshairCursorActive = true
-            } else if !wantsCrosshair && isCrosshairCursorActive {
+            } else {
+                // Pop previous and push new
                 NSCursor.pop()
-                isCrosshairCursorActive = false
+                desiredCursor.push()
             }
         }
 
@@ -586,11 +610,10 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         }
 
         override func mouseDown(with event: NSEvent) {
-            // Shift+click: toggle group selection for simultaneous scrolling
-            if event.modifierFlags.contains(.shift), let panel = panel, let model = model {
+            // Shift+click: toggle group selection via overlay
+            if event.modifierFlags.contains(.shift), let panel = panel, let model = model, model.panels.count > 1 {
                 DispatchQueue.main.async {
-                    model.toggleGroupSelection(for: panel)
-                    model.activePanelID = panel.id
+                    panel.isGroupSelected.toggle()
                 }
                 return
             }
@@ -604,12 +627,25 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
 
             guard let model = model, let panel = panel else { return }
 
+            // Modifier overrides: Option/Control + left-click starts pan
+            let mods = event.modifierFlags.intersection([.option, .control])
+            if !mods.isEmpty {
+                lastDragLocation = event.locationInWindow
+                return
+            }
+
             switch model.activeTool {
+            case .select:
+                break
+
             case .pan:
                 // Just activate (handled above)
                 break
 
             case .windowLevel:
+                lastDragLocation = event.locationInWindow
+
+            case .zoom:
                 lastDragLocation = event.locationInWindow
 
             case .roiWL, .roiStats:
@@ -741,8 +777,8 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         }
 
         override func scrollWheel(with event: NSEvent) {
-            // Option+Scroll = Zoom (unchanged)
-            if event.modifierFlags.contains(.option) {
+            // Option/Control+Scroll or Zoom tool active = Zoom
+            if event.modifierFlags.contains(.option) || event.modifierFlags.contains(.control) || model?.activeTool == .zoom {
                 guard let layer = imageView.layer else { return }
                 let dy = event.deltaY
                 if dy == 0 { return }
@@ -831,7 +867,22 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         override func mouseDragged(with event: NSEvent) {
             guard let panel = panel, let model = model else { return }
 
+            // Modifier overrides: Option/Control + left-drag = pan
+            let mods = event.modifierFlags.intersection([.option, .control])
+            if !mods.isEmpty {
+                guard let layer = imageView.layer else { return }
+                let dx = event.deltaX
+                let dy = -event.deltaY
+                layer.transform.m41 += CGFloat(dx)
+                layer.transform.m42 += CGFloat(dy)
+                saveState()
+                return
+            }
+
             switch model.activeTool {
+            case .select:
+                break
+
             case .pan:
                 // Left-click drag = pan
                 guard let layer = imageView.layer else { return }
@@ -852,6 +903,20 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 let sensitivity: Double = 1.0 * dynamicFactor
                 model.adjustWindowLevelForPanel(panel, deltaWidth: dx * sensitivity, deltaCenter: dy * sensitivity)
                 applyFilters()
+                lastDragLocation = current
+
+            case .zoom:
+                // Drag up = zoom in, drag down = zoom out
+                guard let layer = imageView.layer, let start = lastDragLocation else { return }
+                let current = event.locationInWindow
+                let dy = current.y - start.y
+                let zoomSpeed: CGFloat = 0.005
+                let oldScale = layer.transform.m11
+                var newScale = oldScale + dy * zoomSpeed
+                newScale = max(0.1, min(10.0, newScale))
+                layer.transform.m11 = newScale
+                layer.transform.m22 = newScale
+                saveState()
                 lastDragLocation = current
 
             case .roiWL, .roiStats:
@@ -887,6 +952,9 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
             guard let panel = panel, let model = model else { return }
 
             switch model.activeTool {
+            case .select:
+                break
+
             case .roiWL:
                 if let rect = panel.roiRect, rect.width > 1 && rect.height > 1 {
                     model.autoWindowLevelForPanelROI(panel, rect: rect)
@@ -1071,8 +1139,8 @@ struct ROIOverlay: View {
     }
 
     private func pixelToScreen(_ pixel: CGPoint, viewSize: CGSize) -> CGPoint {
-        let imgW = CGFloat(max(1, panel.imageWidth))
-        let imgH = CGFloat(max(1, panel.imageHeight))
+        let imgW = max(1, panel.displayImageWidth)
+        let imgH = max(1, panel.displayImageHeight)
         let vw = viewSize.width
         let vh = viewSize.height
 
@@ -1655,8 +1723,8 @@ struct AnnotationOverlay: View {
     }
 
     private func pixelToScreen(_ pixel: CGPoint, viewSize: CGSize) -> CGPoint {
-        let imgW = CGFloat(max(1, panel.imageWidth))
-        let imgH = CGFloat(max(1, panel.imageHeight))
+        let imgW = max(1, panel.displayImageWidth)
+        let imgH = max(1, panel.displayImageHeight)
         let vw = viewSize.width
         let vh = viewSize.height
 

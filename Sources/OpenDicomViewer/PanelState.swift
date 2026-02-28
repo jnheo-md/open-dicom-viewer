@@ -71,8 +71,10 @@ enum PanelMode: String, CaseIterable, Identifiable {
 
 // MARK: - Active Tool
 enum ActiveTool: String, CaseIterable, Identifiable {
+    case select = "Select"
     case pan = "Pan"
     case windowLevel = "W/L"
+    case zoom = "Zoom"
     case roiWL = "ROI W/L"
     case roiStats = "ROI Stats"
     case ruler = "Ruler"
@@ -83,8 +85,10 @@ enum ActiveTool: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .pan: return "hand.point.up.left"
+        case .select: return "cursorarrow"
+        case .pan: return "arrow.up.and.down.and.arrow.left.and.right"
         case .windowLevel: return "sun.max"
+        case .zoom: return "magnifyingglass"
         case .roiWL: return "rectangle.dashed"
         case .roiStats: return "chart.bar.xaxis"
         case .ruler: return "ruler"
@@ -95,8 +99,10 @@ enum ActiveTool: String, CaseIterable, Identifiable {
 
     var shortcutHint: String {
         switch self {
-        case .pan: return "V"
+        case .select: return "V"
+        case .pan: return "P"
         case .windowLevel: return "W"
+        case .zoom: return "Z"
         case .roiWL: return "O"
         case .roiStats: return "S"
         case .ruler: return "D"
@@ -140,6 +146,20 @@ class PanelState: ObservableObject, Identifiable {
 
     // Rendered Image
     @Published var image: NSImage? = nil
+
+    // Display dimensions (from NSImage.size, which may differ from raw pixel
+    // dimensions for MPR views with non-isotropic voxels)
+    var displayImageWidth: CGFloat = 0
+    var displayImageHeight: CGFloat = 0
+
+    /// Set the display image and update display dimensions from its size.
+    /// Use this instead of assigning `image` directly so that overlay
+    /// coordinate transforms use the correct (aspect-ratio-corrected) size.
+    func setDisplayImage(_ img: NSImage) {
+        image = img
+        displayImageWidth = img.size.width
+        displayImageHeight = img.size.height
+    }
 
     // Window/Level
     @Published var windowWidth: Double = 0
@@ -232,6 +252,8 @@ class PanelState: ObservableObject, Identifiable {
         mipSlabPosition = 0
         mipSlabThickness = 10
         image = nil
+        displayImageWidth = 0
+        displayImageHeight = 0
         windowWidth = 0
         windowCenter = 0
         initialWindowWidth = 0

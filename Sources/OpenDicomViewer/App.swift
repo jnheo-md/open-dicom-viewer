@@ -17,61 +17,60 @@ struct OpenDicomViewerApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
-            CommandMenu("View") {
+            CommandGroup(replacing: .newItem) {
+                Button("Open...") {
+                    model.openFolder()
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            }
+
+            CommandGroup(after: .toolbar) {
                 // ─ Window/Level ─
-                Button("Auto Window/Level") {
+                Button("Auto Window/Level (A)") {
                     if let panel = model.activePanel {
                         model.autoWindowLevelForPanel(panel)
                     }
                 }
 
-                Button("Invert") {
+                Button("Invert (I)") {
                     model.invertForPanel(model.activePanel)
                 }
-                .keyboardShortcut("i", modifiers: [.command, .shift])
 
                 Divider()
 
                 // ─ Transform ─
-                Button("Fit to Window") {
+                Button("Fit to Window (F)") {
                     model.fitToWindowForPanel(model.activePanel)
                 }
 
-                Button("Reset View") {
+                Button("Reset View (R)") {
                     model.resetViewForPanel(model.activePanel)
                 }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
 
                 Divider()
 
-                Button("Rotate Clockwise 90°") {
+                Button("Rotate Clockwise 90° (])") {
                     model.rotateClockwiseForPanel(model.activePanel)
                 }
-                .keyboardShortcut("]", modifiers: .command)
 
-                Button("Rotate Counter-Clockwise 90°") {
+                Button("Rotate Counter-Clockwise 90° ([)") {
                     model.rotateCounterClockwiseForPanel(model.activePanel)
                 }
-                .keyboardShortcut("[", modifiers: .command)
 
-                Button("Flip Horizontal") {
+                Button("Flip Horizontal (H)") {
                     model.flipHorizontalForPanel(model.activePanel)
                 }
-                .keyboardShortcut("h", modifiers: [.command, .shift])
 
                 Button("Flip Vertical") {
                     model.flipVerticalForPanel(model.activePanel)
                 }
-                .keyboardShortcut("v", modifiers: [.command, .shift])
 
                 Divider()
 
                 // ─ Overlays ─
-                Toggle("Cross-Reference Lines", isOn: $model.showCrossReference)
-                    .keyboardShortcut("x", modifiers: [.command, .shift])
+                Toggle("Cross-Reference Lines (X)", isOn: $model.showCrossReference)
 
-                Toggle("DICOM Tags Inspector", isOn: $model.showTags)
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                Toggle("DICOM Tags Inspector (T)", isOn: $model.showTags)
             }
 
             CommandMenu("Layout") {
@@ -106,6 +105,33 @@ struct OpenDicomViewerApp: App {
 
                 Toggle("Synchronized Scrolling", isOn: $model.synchronizedScrolling)
                     .keyboardShortcut("l", modifiers: [.command, .shift])
+            }
+
+            CommandMenu("Tools") {
+                Button("Select (V)") { model.activeTool = .select }
+                Button("Pan (P)") { model.activeTool = .pan }
+                Button("Window/Level (W)") { model.activeTool = .windowLevel }
+                Button("Zoom (Z)") { model.activeTool = .zoom }
+
+                Divider()
+
+                Button("ROI W/L (O)") { model.activeTool = .roiWL }
+                Button("ROI Stats (S)") { model.activeTool = .roiStats }
+
+                Divider()
+
+                Button("Ruler (D)") { model.activeTool = .ruler }
+                Button("Angle (N)") { model.activeTool = .angle }
+
+                Divider()
+
+                Button("Eraser (E)") { model.activeTool = .eraser }
+            }
+
+            CommandGroup(replacing: .help) {
+                Button("OpenDicomViewer Help") {
+                    model.showHelp = true
+                }
             }
         }
     }

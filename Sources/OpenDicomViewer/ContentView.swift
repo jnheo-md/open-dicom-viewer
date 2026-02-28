@@ -186,12 +186,6 @@ struct ContentView: View {
                 case "l":
                     model.synchronizedScrolling.toggle()
                     return .handled
-                // G = Toggle group selection on active panel
-                case "g":
-                    if let panel = model.activePanel {
-                        model.toggleGroupSelection(for: panel)
-                    }
-                    return .handled
                 // X = Toggle cross-reference lines
                 case "x":
                     model.showCrossReference.toggle()
@@ -242,29 +236,21 @@ struct ContentView: View {
                 case "w":
                     model.activeTool = .windowLevel
                     return .handled
-                // V = Pan tool
+                // V = Select tool (default)
                 case "v":
+                    model.activeTool = .select
+                    return .handled
+                // P = Pan tool
+                case "p":
                     model.activeTool = .pan
+                    return .handled
+                // Z = Zoom tool
+                case "z":
+                    model.activeTool = .zoom
                     return .handled
                 // H = Flip horizontal
                 case "h":
                     model.flipHorizontalForPanel(model.activePanel)
-                    return .handled
-                default: break
-                }
-            }
-
-            // Shift+G = Select/deselect all panels in group
-            if press.modifiers == .shift {
-                switch press.characters.lowercased() {
-                case "g":
-                    let allSelected = model.panels.allSatisfy { $0.isGroupSelected }
-                    if allSelected {
-                        model.clearGroupSelection()
-                    } else {
-                        let allIDs = Set(model.panels.map { $0.id })
-                        model.setGroupSelection(panelIDs: allIDs)
-                    }
                     return .handled
                 default: break
                 }
@@ -287,6 +273,9 @@ struct ContentView: View {
             } else {
                 TagView(tags: activeTags)
             }
+        }
+        .sheet(isPresented: $model.showHelp) {
+            HelpView()
         }
         .preferredColorScheme(.dark)
         .background(WindowAccessor())
@@ -356,14 +345,7 @@ struct SidebarView: View {
     }
     
     private func openFile() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [UTType(filenameExtension: "dcm")!, .folder]
-        if panel.runModal() == .OK, let url = panel.url {
-            model.load(url: url)
-        }
+        model.openFolder()
     }
 }
 
