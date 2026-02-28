@@ -149,6 +149,17 @@ class PanelState: ObservableObject, Identifiable {
     @Published var isROIMode: Bool = false
     @Published var roiRect: CGRect? = nil  // in pixel coordinates, used during drag
 
+    // Per-panel loading queue (prevents cross-panel cancellation)
+    let loadingQueue: OperationQueue = {
+        let q = OperationQueue()
+        q.maxConcurrentOperationCount = 1
+        q.qualityOfService = .userInitiated
+        return q
+    }()
+
+    // Group selection for simultaneous scrolling
+    @Published var isGroupSelected: Bool = false
+
     // Display modifiers
     @Published var isInverted: Bool = false
     @Published var rotationSteps: Int = 0       // 0=0°, 1=90°CW, 2=180°, 3=270°CW
@@ -200,6 +211,7 @@ class PanelState: ObservableObject, Identifiable {
         hasCursorPatientPosition = false
         isROIMode = false
         roiRect = nil
+        isGroupSelected = false
         isInverted = false
         rotationSteps = 0
         isFlippedH = false

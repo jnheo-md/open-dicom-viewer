@@ -176,6 +176,12 @@ struct ContentView: View {
                 case "l":
                     model.synchronizedScrolling.toggle()
                     return .handled
+                // G = Toggle group selection on active panel
+                case "g":
+                    if let panel = model.activePanel {
+                        model.toggleGroupSelection(for: panel)
+                    }
+                    return .handled
                 // X = Toggle cross-reference lines
                 case "x":
                     model.showCrossReference.toggle()
@@ -192,23 +198,46 @@ struct ContentView: View {
                 case "f":
                     model.fitToWindowForPanel(model.activePanel)
                     return .handled
+                // A = Auto W/L
+                case "a":
+                    if let panel = model.activePanel {
+                        model.autoWindowLevelForPanel(panel)
+                    }
+                    return .handled
+                // O = ROI Auto W/L mode
+                case "o":
+                    if let panel = model.activePanel {
+                        panel.isROIMode.toggle()
+                    }
+                    return .handled
                 default: break
                 }
             }
-            // Shift+A = Auto W/L
-            if press.modifiers == .shift && press.characters == "A" {
-                if let panel = model.activePanel {
-                    model.autoWindowLevelForPanel(panel)
+
+            // Shift+G = Select/deselect all panels in group
+            if press.modifiers == .shift {
+                switch press.characters.lowercased() {
+                case "g":
+                    let allSelected = model.panels.allSatisfy { $0.isGroupSelected }
+                    if allSelected {
+                        model.clearGroupSelection()
+                    } else {
+                        let allIDs = Set(model.panels.map { $0.id })
+                        model.setGroupSelection(panelIDs: allIDs)
+                    }
+                    return .handled
+                default: break
                 }
-                return .handled
             }
-            // Shift+R = ROI mode
-            if press.modifiers == .shift && press.characters == "R" {
-                if let panel = model.activePanel {
-                    panel.isROIMode.toggle()
+
+            // Escape = Clear group selection
+            if press.key == .escape {
+                if model.groupSelectedPanels.count > 0 {
+                    model.clearGroupSelection()
+                    return .handled
                 }
-                return .handled
             }
+
             return .ignored
         }
         .inspector(isPresented: $showTags) {

@@ -32,66 +32,62 @@ struct MultiPanelContainer: View {
     var body: some View {
         let layout = model.layout
 
-        GeometryReader { geo in
-            // Fullscreen mode: show only the fullscreen panel
-            if let fsID = model.fullscreenPanelID,
-               let fsPanel = model.panels.first(where: { $0.id == fsID }) {
-                PanelView(
-                    model: model,
-                    panel: fsPanel,
-                    isActive: true,
-                    isFocused: $isFocused
-                )
-                .id(fsPanel.id)
-                .onTapGesture(count: 2) {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        model.toggleFullscreen(for: fsPanel)
-                    }
+        // Fullscreen mode: show only the fullscreen panel
+        if let fsID = model.fullscreenPanelID,
+           let fsPanel = model.panels.first(where: { $0.id == fsID }) {
+            PanelView(
+                model: model,
+                panel: fsPanel,
+                isActive: true,
+                isFocused: $isFocused
+            )
+            .id(fsPanel.id)
+            .onTapGesture(count: 2) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    model.toggleFullscreen(for: fsPanel)
                 }
-                .onTapGesture(count: 1) {
-                    isFocused = true
-                }
-            } else {
-                // Grid mode — compute exact cell size to guarantee equal panels
-                let rows = layout.rows
-                let cols = layout.columns
-                let cellW = (geo.size.width - CGFloat(cols - 1)) / CGFloat(cols)
-                let cellH = (geo.size.height - CGFloat(rows - 1)) / CGFloat(rows)
+            }
+            .onTapGesture(count: 1) {
+                isFocused = true
+            }
+        } else {
+            // Grid mode — equal sizing via flexible frames
+            let rows = layout.rows
+            let cols = layout.columns
 
-                VStack(spacing: 1) {
-                    ForEach(0..<rows, id: \.self) { row in
-                        HStack(spacing: 1) {
-                            ForEach(0..<cols, id: \.self) { col in
-                                let index = row * cols + col
-                                if index < model.panels.count {
-                                    let panel = model.panels[index]
-                                    PanelView(
-                                        model: model,
-                                        panel: panel,
-                                        isActive: panel.id == model.activePanelID,
-                                        isFocused: $isFocused
-                                    )
-                                    .frame(width: cellW, height: cellH)
-                                    .id(panel.id)
-                                    .onTapGesture(count: 2) {
-                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                            model.toggleFullscreen(for: panel)
-                                        }
+            VStack(spacing: 1) {
+                ForEach(0..<rows, id: \.self) { row in
+                    HStack(spacing: 1) {
+                        ForEach(0..<cols, id: \.self) { col in
+                            let index = row * cols + col
+                            if index < model.panels.count {
+                                let panel = model.panels[index]
+                                PanelView(
+                                    model: model,
+                                    panel: panel,
+                                    isActive: panel.id == model.activePanelID,
+                                    isFocused: $isFocused
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .id(panel.id)
+                                .onTapGesture(count: 2) {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        model.toggleFullscreen(for: panel)
                                     }
-                                    .onTapGesture(count: 1) {
-                                        model.activePanelID = panel.id
-                                        isFocused = true
-                                    }
-                                } else {
-                                    EmptyPanelView()
-                                        .frame(width: cellW, height: cellH)
                                 }
+                                .onTapGesture(count: 1) {
+                                    model.activePanelID = panel.id
+                                    isFocused = true
+                                }
+                            } else {
+                                EmptyPanelView()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
                         }
                     }
                 }
-                .background(Color(white: 0.15))
             }
+            .background(Color(white: 0.15))
         }
     }
 }
@@ -157,6 +153,32 @@ struct PanelView: View {
                 .zIndex(5)
             }
 
+            // Group selection button (top-right, multi-panel only)
+            if model.panels.count > 1 && panel.seriesIndex >= 0 {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            model.toggleGroupSelection(for: panel)
+                        }) {
+                            Image(systemName: panel.isGroupSelected ? "square.stack.3d.up.fill" : "square.stack.3d.up.slash")
+                                .font(.system(size: 12))
+                                .foregroundStyle(panel.isGroupSelected ? .orange : .secondary)
+                                .frame(width: 24, height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(panel.isGroupSelected ? Color.orange.opacity(0.2) : Color.black.opacity(0.4))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help(panel.isGroupSelected ? "Remove from scroll group (Shift+Click or G)" : "Add to scroll group (Shift+Click or G)")
+                        .padding(6)
+                    }
+                    Spacer()
+                }
+                .zIndex(6)
+            }
+
             // Cross-reference lines overlay
             if panel.image != nil && model.panels.count > 1 && model.showCrossReference {
                 CrossReferenceOverlay(model: model, panel: panel)
@@ -171,7 +193,10 @@ struct PanelView: View {
 
             // Orientation labels (A/P/R/L/S/I)
             if panel.image != nil {
-                OrientationLabelsOverlay(orientation: panel.imageOrientationPatient)
+                OrientationLabelsOverlay(orientation: panel.imageOrientationPatient,
+                                         rotationSteps: panel.rotationSteps,
+                                         isFlippedH: panel.isFlippedH,
+                                         isFlippedV: panel.isFlippedV)
                     .zIndex(15)
             }
 
@@ -236,31 +261,42 @@ struct PanelView: View {
             }
 
             // Adjustment Toolbar (bottom center)
-            if panel.image != nil && !panel.isLoading {
+            if panel.image != nil {
                 VStack {
                     Spacer()
                     PanelAdjustmentToolbar(model: model, panel: panel)
                         .padding(.bottom, 20)
                 }
                 .zIndex(60)
+            }
 
-                // Right Side Scroller
+            // Right Side Scroller (always visible when series assigned)
+            if panel.seriesIndex >= 0 {
                 HStack {
                     Spacer()
                     PanelDICOMScroller(model: model, panel: panel)
                         .frame(width: 40)
                         .padding(.trailing, 4)
-                        .padding(.vertical, 20)
+                        .padding(.vertical, 8)
                 }
                 .frame(maxHeight: .infinity)
                 .zIndex(70)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Active panel border
+        // Active panel border + group selection border
         .overlay(
-            Rectangle()
-                .stroke(isActive ? Color.accentColor : Color.clear, lineWidth: 1.5)
+            ZStack {
+                // Group selection border (outer, orange)
+                if panel.isGroupSelected {
+                    Rectangle()
+                        .stroke(Color.orange, lineWidth: 2.5)
+                }
+                // Active panel border (inner, accent color)
+                Rectangle()
+                    .stroke(isActive ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                    .padding(panel.isGroupSelected ? 2.5 : 0)
+            }
         )
         .clipped()
     }
@@ -286,6 +322,7 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         nsView.setImage(image)
         nsView.applyFilters()
         nsView.updateTransform()
+        nsView.updateROICursor()
     }
 
     class PanelDICOMInteractView: NSView {
@@ -295,6 +332,12 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         private var lastDragLocation: NSPoint?
         private var scrollAccumulator: CGFloat = 0.0
         private var roiStartPixel: CGPoint?  // ROI drag start in pixel coords
+        private var isCrosshairCursorActive: Bool = false
+
+        // Prevent image dimensions from influencing SwiftUI layout
+        override var intrinsicContentSize: NSSize {
+            NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -322,6 +365,11 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
             self.layer?.masksToBounds = true
 
             imageView.imageScaling = .scaleProportionallyUpOrDown
+            // Prevent NSImageView from wanting to grow to its image's natural size
+            imageView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            imageView.setContentHuggingPriority(.defaultLow, for: .vertical)
+            imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
             self.addSubview(imageView)
 
             imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -475,6 +523,17 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
 
         override var acceptsFirstResponder: Bool { true }
 
+        func updateROICursor() {
+            let wantsCrosshair = panel?.isROIMode == true
+            if wantsCrosshair && !isCrosshairCursorActive {
+                NSCursor.crosshair.push()
+                isCrosshairCursorActive = true
+            } else if !wantsCrosshair && isCrosshairCursorActive {
+                NSCursor.pop()
+                isCrosshairCursorActive = false
+            }
+        }
+
         /// Convert a window-space NSEvent location to image pixel coordinates.
         /// Returns nil if the position is outside the image bounds.
         private func screenToPixel(_ event: NSEvent) -> CGPoint? {
@@ -510,6 +569,15 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         }
 
         override func mouseDown(with event: NSEvent) {
+            // Shift+click: toggle group selection for simultaneous scrolling
+            if event.modifierFlags.contains(.shift), let panel = panel, let model = model {
+                DispatchQueue.main.async {
+                    model.toggleGroupSelection(for: panel)
+                    model.activePanelID = panel.id
+                }
+                return
+            }
+
             // Activate this panel on click
             if let panel = panel, let model = model {
                 DispatchQueue.main.async {
@@ -536,8 +604,8 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
             switch code {
             case 123: model.navigatePanel(panel, direction: .prevSeries)
             case 124: model.navigatePanel(panel, direction: .nextSeries)
-            case 126: model.navigatePanel(panel, direction: .prevImage)
-            case 125: model.navigatePanel(panel, direction: .nextImage)
+            case 126: model.navigatePanelWithGroup(panel, direction: .prevImage)
+            case 125: model.navigatePanelWithGroup(panel, direction: .nextImage)
             default: super.keyDown(with: event)
             }
         }
@@ -583,24 +651,23 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 }
                 scrollAccumulator += delta
 
-                let threshold: CGFloat = 10.0
-                while abs(scrollAccumulator) >= threshold {
+                let threshold: CGFloat = 25.0
+                if abs(scrollAccumulator) >= threshold {
                     if scrollAccumulator > 0 {
-                        model.navigatePanel(panel, direction: .prevImage)
-                        scrollAccumulator -= threshold
+                        model.navigatePanelWithGroup(panel, direction: .prevImage)
                     } else {
-                        model.navigatePanel(panel, direction: .nextImage)
-                        scrollAccumulator += threshold
+                        model.navigatePanelWithGroup(panel, direction: .nextImage)
                     }
+                    scrollAccumulator = 0
                 }
             } else {
                 // Mouse wheel: navigate immediately per click
                 let dy = event.deltaY
                 if dy == 0 { return }
                 if dy > 0 {
-                    model.navigatePanel(panel, direction: .prevImage)
+                    model.navigatePanelWithGroup(panel, direction: .prevImage)
                 } else {
-                    model.navigatePanel(panel, direction: .nextImage)
+                    model.navigatePanelWithGroup(panel, direction: .nextImage)
                 }
             }
         }
@@ -685,8 +752,16 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
             ))
         }
 
+        override func mouseEntered(with event: NSEvent) {
+            updateROICursor()
+        }
+
         override func mouseExited(with event: NSEvent) {
             panel?.showCursorInfo = false
+            if isCrosshairCursorActive {
+                NSCursor.pop()
+                isCrosshairCursorActive = false
+            }
         }
 
         override func mouseMoved(with event: NSEvent) {
@@ -885,7 +960,7 @@ struct PanelAdjustmentToolbar: View {
             Button(action: { model.autoWindowLevelForPanel(panel) }) {
                 HStack(spacing: 4) {
                     Text("Auto")
-                    Text("⇧A")
+                    Text("A")
                         .font(.system(size: 9, weight: .medium, design: .rounded))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -894,13 +969,13 @@ struct PanelAdjustmentToolbar: View {
                 }
             }
             .frame(height: 40)
-            .help("Auto W/L (⇧A)")
+            .help("Auto W/L (A)")
 
             Button(action: { panel.isROIMode.toggle() }) {
                 HStack(spacing: 4) {
                     Image(systemName: "rectangle.dashed")
                     Text("ROI")
-                    Text("⇧R")
+                    Text("O")
                         .font(.system(size: 9, weight: .medium, design: .rounded))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -909,7 +984,7 @@ struct PanelAdjustmentToolbar: View {
                 }
             }
             .frame(height: 40)
-            .help("ROI Auto W/L (⇧R)")
+            .help("ROI Auto W/L (O)")
             .background(panel.isROIMode ? Color.accentColor.opacity(0.3) : Color.clear)
             .cornerRadius(4)
         }
@@ -996,8 +1071,8 @@ struct PanelDICOMScroller: View {
             ZStack(alignment: .top) {
                 // Track
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(0.2))
-                    .frame(width: 6, height: geo.size.height)
+                    .fill(Color.white.opacity(0.3))
+                    .frame(width: 8, height: geo.size.height)
                     .frame(maxWidth: .infinity, alignment: .trailing)
 
                 // Handle
@@ -1009,7 +1084,7 @@ struct PanelDICOMScroller: View {
 
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.white.opacity(0.8))
-                        .frame(width: 6, height: thumbHeight)
+                        .frame(width: 8, height: thumbHeight)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .offset(y: offset)
                 }
@@ -1170,33 +1245,72 @@ struct PanelScrollerInteractionView: NSViewRepresentable {
 
 struct OrientationLabelsOverlay: View {
     let orientation: [Double]?
+    var rotationSteps: Int = 0
+    var isFlippedH: Bool = false
+    var isFlippedV: Bool = false
 
     var body: some View {
         if let ori = orientation, ori.count == 6 {
             let row = SIMD3<Double>(ori[0], ori[1], ori[2])
             let col = SIMD3<Double>(ori[3], ori[4], ori[5])
 
+            // Base labels: right, left, bottom, top
+            let baseRight = dirLabel(row)
+            let baseLeft = oppositeLabel(baseRight)
+            let baseBottom = dirLabel(col)
+            let baseTop = oppositeLabel(baseBottom)
+
+            // Apply flip and rotation transforms to the 4 label slots.
+            // Start with logical positions: right=0, top=1, left=2, bottom=3
+            // then rotate and flip to get the final label for each screen position.
+            let labels = transformedLabels(
+                right: baseRight, top: baseTop, left: baseLeft, bottom: baseBottom,
+                rotationSteps: rotationSteps, flipH: isFlippedH, flipV: isFlippedV)
+
             GeometryReader { geo in
                 let w = geo.size.width
                 let h = geo.size.height
 
-                // Right edge: direction of row vector
-                Text(dirLabel(row))
+                Text(labels.right)
                     .position(x: w - 16, y: h / 2)
-                // Left edge: opposite of row vector
-                Text(oppositeLabel(dirLabel(row)))
+                Text(labels.left)
                     .position(x: 16, y: h / 2)
-                // Bottom edge: direction of column vector
-                Text(dirLabel(col))
+                Text(labels.bottom)
                     .position(x: w / 2, y: h - 16)
-                // Top edge: opposite of column vector
-                Text(oppositeLabel(dirLabel(col)))
+                Text(labels.top)
                     .position(x: w / 2, y: 16)
             }
             .font(.system(size: 14, weight: .bold, design: .monospaced))
             .foregroundStyle(.yellow.opacity(0.8))
             .allowsHitTesting(false)
         }
+    }
+
+    /// Apply flip and rotation to the four orientation labels.
+    /// Rotation is CW in 90-degree steps; flips are applied before rotation
+    /// (matching the image transform order in restoreState).
+    private func transformedLabels(
+        right: String, top: String, left: String, bottom: String,
+        rotationSteps: Int, flipH: Bool, flipV: Bool
+    ) -> (right: String, top: String, left: String, bottom: String) {
+        // Put labels in array: [right, top, left, bottom] indexed 0-3
+        var labels = [right, top, left, bottom]
+
+        // Horizontal flip swaps left ↔ right
+        if flipH { labels.swapAt(0, 2) }
+        // Vertical flip swaps top ↔ bottom
+        if flipV { labels.swapAt(1, 3) }
+
+        // CW rotation by N steps: each 90° CW step moves
+        // right→bottom, bottom→left, left→top, top→right
+        // That's equivalent to rotating the array backward by N positions.
+        let steps = ((rotationSteps % 4) + 4) % 4
+        if steps > 0 {
+            let rotated = (0..<4).map { labels[($0 + steps) % 4] }
+            labels = rotated
+        }
+
+        return (right: labels[0], top: labels[1], left: labels[2], bottom: labels[3])
     }
 
     /// Map a direction vector to its dominant anatomical label.
