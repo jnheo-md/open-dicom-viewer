@@ -23,13 +23,12 @@ import QuartzCore
 
 struct ContentView: View {
     @ObservedObject var model: DICOMModel
-    @State private var showTags: Bool = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @FocusState private var isFocused: Bool
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(model: model, showTags: $showTags, columnVisibility: $columnVisibility)
+            SidebarView(model: model, columnVisibility: $columnVisibility)
             .navigationSplitViewColumnWidth(min: 250, ideal: 300)
             .toolbar(removing: .sidebarToggle)
         } detail: {
@@ -67,11 +66,11 @@ struct ContentView: View {
                         HStack(spacing: 8) {
                             LayoutToolbar(model: model)
 
-                            Button(action: { showTags.toggle() }) {
+                            Button(action: { model.showTags.toggle() }) {
                                 ZStack(alignment: .bottomTrailing) {
                                     Image(systemName: "tag")
                                         .font(.system(size: 16))
-                                        .foregroundStyle(showTags ? .white : .secondary)
+                                        .foregroundStyle(model.showTags ? .white : .secondary)
                                         .padding(8)
 
                                     Text("T")
@@ -88,6 +87,17 @@ struct ContentView: View {
                     }
                     .padding()
 
+                    Spacer()
+                }
+
+                // Left-side tool palette
+                VStack {
+                    Spacer()
+                    HStack {
+                        ToolPalette(model: model)
+                            .padding(.leading, 8)
+                        Spacer()
+                    }
                     Spacer()
                 }
             }
@@ -188,7 +198,7 @@ struct ContentView: View {
                     return .handled
                 // T = Toggle DICOM tags
                 case "t":
-                    showTags.toggle()
+                    model.showTags.toggle()
                     return .handled
                 // I = Invert
                 case "i":
@@ -204,11 +214,41 @@ struct ContentView: View {
                         model.autoWindowLevelForPanel(panel)
                     }
                     return .handled
-                // O = ROI Auto W/L mode
+                // Tool selection shortcuts
                 case "o":
-                    if let panel = model.activePanel {
-                        panel.isROIMode.toggle()
-                    }
+                    model.activeTool = .roiWL
+                    return .handled
+                case "s":
+                    model.activeTool = .roiStats
+                    return .handled
+                case "d":
+                    model.activeTool = .ruler
+                    return .handled
+                case "n":
+                    model.activeTool = .angle
+                    return .handled
+                case "e":
+                    model.activeTool = .eraser
+                    return .handled
+                // ] or . = Rotate clockwise 90°
+                case "]", ".":
+                    model.rotateClockwiseForPanel(model.activePanel)
+                    return .handled
+                // [ or , = Rotate counter-clockwise 90°
+                case "[", ",":
+                    model.rotateCounterClockwiseForPanel(model.activePanel)
+                    return .handled
+                // W = Window/Level tool
+                case "w":
+                    model.activeTool = .windowLevel
+                    return .handled
+                // V = Pan tool
+                case "v":
+                    model.activeTool = .pan
+                    return .handled
+                // H = Flip horizontal
+                case "h":
+                    model.flipHorizontalForPanel(model.activePanel)
                     return .handled
                 default: break
                 }
@@ -240,7 +280,7 @@ struct ContentView: View {
 
             return .ignored
         }
-        .inspector(isPresented: $showTags) {
+        .inspector(isPresented: $model.showTags) {
             let activeTags = model.activePanel?.tags ?? []
             if activeTags.isEmpty {
                 ContentUnavailableView("No Tags", systemImage: "tag.slash")
@@ -279,7 +319,6 @@ struct ContentView: View {
 
 struct SidebarView: View {
     @ObservedObject var model: DICOMModel
-    @Binding var showTags: Bool
     @Binding var columnVisibility: NavigationSplitViewVisibility
     
     var body: some View {

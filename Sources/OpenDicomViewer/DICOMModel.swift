@@ -95,6 +95,9 @@ class DICOMModel: ObservableObject {
     @Published var tags: [DicomElement] = []
     @Published var errorMessage: String?
     @Published var isLoading: Bool = false
+
+    // Active tool selection
+    @Published var activeTool: ActiveTool = .pan
     
     // Series Management
     @Published var allSeries: [DicomSeries] = []
@@ -160,6 +163,7 @@ class DICOMModel: ObservableObject {
     @Published var panels: [PanelState] = []
     @Published var activePanelID: UUID = UUID()
     @Published var showCrossReference: Bool = false
+    @Published var showTags: Bool = false
     @Published var synchronizedScrolling: Bool = false {
         didSet {
             guard synchronizedScrolling, let source = activePanel else { return }
@@ -2062,6 +2066,30 @@ class DICOMModel: ObservableObject {
         panel.isInverted.toggle()
     }
 
+    /// Rotate image 90° clockwise
+    func rotateClockwiseForPanel(_ panel: PanelState?) {
+        guard let panel = panel else { return }
+        panel.rotationSteps = (panel.rotationSteps + 1) % 4
+    }
+
+    /// Rotate image 90° counter-clockwise
+    func rotateCounterClockwiseForPanel(_ panel: PanelState?) {
+        guard let panel = panel else { return }
+        panel.rotationSteps = (panel.rotationSteps + 3) % 4
+    }
+
+    /// Flip image horizontally
+    func flipHorizontalForPanel(_ panel: PanelState?) {
+        guard let panel = panel else { return }
+        panel.isFlippedH.toggle()
+    }
+
+    /// Flip image vertically
+    func flipVerticalForPanel(_ panel: PanelState?) {
+        guard let panel = panel else { return }
+        panel.isFlippedV.toggle()
+    }
+
     // MARK: - Multi-Panel Management
 
     /// Initialize panels array on first use
@@ -2902,6 +2930,56 @@ class DICOMModel: ObservableObject {
         let newWW = max(1.0, maxVal - minVal)
         let newWC = minVal + (newWW / 2.0)
         adjustWindowLevelForPanel(panel, deltaWidth: newWW - panel.windowWidth, deltaCenter: newWC - panel.windowCenter)
+    }
+
+    /// Compute HU statistics for a pixel-coordinate rectangle on a panel
+    func computeROIStats(panel: PanelState, rect: CGRect) -> (mean: Double, max: Double, min: Double, stdDev: Double, count: Int)? {
+        guard let data = panel.rawPixelData else { return nil }
+        let w = panel.imageWidth
+        let h = panel.imageHeight
+        let minX = max(0, Int(rect.minX))
+        let minY = max(0, Int(rect.minY))
+        let maxX = min(w - 1, Int(rect.maxX))
+        let maxY = min(h - 1, Int(rect.maxY))
+        guard maxX > minX, maxY > minY else { return nil }
+
+        var values: [Double] = []
+        values.reserveCapacity((maxX - minX) * (maxY - minY))
+
+        data.withUnsafeBytes { raw in
+            for py in minY...maxY {
+                for px in minX...maxX {
+                    let index = py * w + px
+                    var val: Double = 0
+                    if panel.bitDepth > 8 {
+                        let byteIndex = index * 2
+                        if byteIndex + 1 < data.count {
+                            if let ptr = raw.baseAddress?.assumingMemoryBound(to: UInt16.self) {
+                                if panel.isSigned {
+                                    val = Double(Int16(bitPattern: ptr[index]))
+                                } else {
+                                    val = Double(ptr[index])
+                                }
+                            }
+                        }
+                    } else if index < data.count {
+                        val = Double(raw[index])
+                    }
+                    values.append(val)
+                }
+            }
+        }
+
+        guard !values.isEmpty else { return nil }
+        let count = values.count
+        let sum = values.reduce(0, +)
+        let mean = sum / Double(count)
+        let maxVal = values.max() ?? 0
+        let minVal = values.min() ?? 0
+        let variance = values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(count)
+        let stdDev = sqrt(variance)
+
+        return (mean: mean, max: maxVal, min: minVal, stdDev: stdDev, count: count)
     }
 
     /// Save view state (zoom/pan) for a panel

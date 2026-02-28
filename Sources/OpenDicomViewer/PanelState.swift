@@ -69,6 +69,55 @@ enum PanelMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - Active Tool
+enum ActiveTool: String, CaseIterable, Identifiable {
+    case pan = "Pan"
+    case windowLevel = "W/L"
+    case roiWL = "ROI W/L"
+    case roiStats = "ROI Stats"
+    case ruler = "Ruler"
+    case angle = "Angle"
+    case eraser = "Eraser"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .pan: return "hand.point.up.left"
+        case .windowLevel: return "sun.max"
+        case .roiWL: return "rectangle.dashed"
+        case .roiStats: return "chart.bar.xaxis"
+        case .ruler: return "ruler"
+        case .angle: return "angle"
+        case .eraser: return "eraser"
+        }
+    }
+
+    var shortcutHint: String {
+        switch self {
+        case .pan: return "V"
+        case .windowLevel: return "W"
+        case .roiWL: return "O"
+        case .roiStats: return "S"
+        case .ruler: return "D"
+        case .angle: return "N"
+        case .eraser: return "E"
+        }
+    }
+}
+
+// MARK: - Annotations
+enum AnnotationType {
+    case ruler(start: CGPoint, end: CGPoint, distanceMM: Double)
+    case angle(vertex: CGPoint, arm1: CGPoint, arm2: CGPoint, degrees: Double)
+    case roiStats(rect: CGRect, mean: Double, max: Double, min: Double, stdDev: Double, count: Int)
+}
+
+struct Annotation: Identifiable {
+    let id = UUID()
+    let type: AnnotationType
+}
+
 // MARK: - Panel State
 /// Per-panel observable state. Each panel in the multi-panel viewer gets its own instance.
 /// Shared resources (caches, queues, series data) remain in DICOMModel.
@@ -166,6 +215,14 @@ class PanelState: ObservableObject, Identifiable {
     @Published var isFlippedH: Bool = false      // Horizontal flip (left-right)
     @Published var isFlippedV: Bool = false       // Vertical flip (up-down)
 
+    // Annotations
+    @Published var annotations: [Annotation] = []
+
+    // In-progress annotation preview
+    @Published var rulerPreviewStart: CGPoint? = nil
+    @Published var rulerPreviewEnd: CGPoint? = nil
+    @Published var anglePreviewPoints: [CGPoint] = []
+
     /// Reset panel to empty state
     func reset() {
         seriesIndex = -1
@@ -216,5 +273,9 @@ class PanelState: ObservableObject, Identifiable {
         rotationSteps = 0
         isFlippedH = false
         isFlippedV = false
+        annotations = []
+        rulerPreviewStart = nil
+        rulerPreviewEnd = nil
+        anglePreviewPoints = []
     }
 }
