@@ -1,44 +1,120 @@
 # OpenDicomViewer
 
-A native macOS DICOM medical image viewer built with SwiftUI. Designed for fast, lightweight viewing of DICOM studies with multi-panel layouts, MPR reconstruction, and GPU-accelerated volume rendering.
+A native macOS DICOM medical image viewer built with SwiftUI. Designed for fast, lightweight viewing of DICOM studies with multi-panel layouts, MPR reconstruction, GPU-accelerated volume rendering, and clinical measurement tools.
 
 <!-- ![Screenshot](screenshot.png) -->
 
 ## Features
 
+### Viewing & Navigation
 - **Fast DICOM Parsing** — Custom pure-Swift DICOM parser with incremental directory scanning; first image displays instantly while the rest of the study loads in the background
 - **Multi-Panel Layouts** — Single, side-by-side (2x1), stacked (1x2), and quad (2x2) panel arrangements with drag-and-drop series assignment
+- **Fullscreen Panel** — Double-click any panel to toggle fullscreen mode
+- **Series Thumbnails** — Automatic thumbnail generation for the sidebar series list
+- **Scrollbar with Preview** — Drag or hover the right-side scrollbar for rapid navigation with thumbnail previews
+
+### Reconstruction & Rendering
 - **MPR Reconstruction** — One-click multi-planar reformatting: axial, sagittal, coronal, and MIP views from a single series
-- **GPU Volume Rendering** — Metal compute shader for real-time MIP, MinIP, and average intensity projections with slab thickness control
-- **Synchronized Scrolling** — Link panels to scroll to the same spatial position across different series using z-location matching
+- **GPU Volume Rendering** — Metal compute shader for real-time MIP, MinIP, and average intensity projections with adjustable slab thickness
+
+### Window/Level & Display
+- **Window/Level Controls** — Interactive right-click drag, W/L tool, auto W/L, ROI-based W/L, and histogram display
+- **Display Transforms** — Invert (negative), rotate (90° steps), flip horizontal/vertical
+- **Fit to Window / Reset View** — Quick shortcuts to reset zoom, pan, and W/L
+
+### Measurement & Annotation Tools
+- **Ruler** — Click two points to measure distance (mm when pixel spacing is available, otherwise pixels)
+- **Angle** — Click three points to measure an angle in degrees
+- **ROI Statistics** — Draw a rectangle to compute mean, std dev, min, max, and pixel count
+- **Eraser** — Click near any annotation to remove it
+- **Floating Tool Palette** — Left-side palette for quick tool selection: Select, Pan, W/L, Zoom, ROI W/L, ROI Stats, Ruler, Angle, Eraser
+
+### Multi-Panel Coordination
+- **Synchronized Scrolling** — Link all panels to scroll to the same spatial position across series using z-location matching
+- **Group Selection** — Hold **Shift** to reveal a selection overlay on each panel; click panels to group them for simultaneous scrolling (orange = linked). Auto-clears if only one panel remains when Shift is released
 - **Cross-Reference Lines** — Optional overlay showing where other panels' slice planes intersect the current view
-- **Window/Level Controls** — Interactive mouse drag, auto W/L, ROI-based W/L, histogram display, and preset support
+
+### Metadata & Overlays
 - **DICOM Tag Inspector** — Browse all DICOM metadata tags for the current image
-- **Series Thumbnails** — Automatic thumbnail generation for the series list
-- **Cursor Readout** — Real-time HU value and patient coordinate display under the cursor
+- **Cursor Readout** — Real-time HU value, pixel coordinates, and patient coordinates under the cursor
 - **Orientation Labels** — Anatomical direction labels (A/P/R/L/S/I) based on DICOM orientation metadata
 - **JPEG 2000 Support** — Handles compressed transfer syntaxes via DCMTK + OpenJPEG
 
+### Help & Documentation
+- **In-App Help** — Comprehensive help viewer accessible via **Help > OpenDicomViewer Help** (Cmd+?)
+- **Menu Bar** — Full View, Layout, and Tools menus with keyboard shortcut hints
+
 ## Keyboard Shortcuts
+
+### Navigation
 
 | Key | Action |
 |-----|--------|
-| `1` / `2` / `3` / `4` | Switch layout: single / side-by-side / stacked / quad |
-| `L` | Toggle synchronized scrolling (link) |
-| `X` | Toggle cross-reference lines |
-| `T` | Toggle DICOM tag inspector |
-| `R` | Reset view (zoom, pan, window/level) |
-| `I` | Invert image |
-| `F` | Fit image to window |
-| `Shift+A` | Auto window/level |
-| `Shift+R` | Toggle ROI window/level mode |
+| `Up` / `Down` | Previous / next image in series |
+| `Left` / `Right` | Previous / next series |
+| `Scroll` | Navigate slices |
+| `Page Up` / `Page Down` | Skip 10 images |
+| `Home` / `End` | Jump to first / last image |
 | `Tab` | Cycle active panel |
-| `Up/Down` | Previous/next image in series |
-| `Left/Right` | Previous/next series |
-| `Page Up/Down` | Skip 10 images |
-| `Home/End` | Jump to first/last image |
-| `Cmd+1-4` | Layout switching (menu bar) |
+| `Double-click` | Toggle panel fullscreen |
+
+### Layout
+
+| Key | Action |
+|-----|--------|
+| `1` / `2` / `3` / `4` | Single / side-by-side / stacked / quad |
+| `Cmd+1` - `Cmd+4` | Layout switching (menu bar) |
 | `Cmd+Shift+M` | MPR layout |
+
+### Tools
+
+| Key | Tool |
+|-----|------|
+| `V` | Select (default pointer) |
+| `P` | Pan |
+| `W` | Window/Level |
+| `Z` | Zoom |
+| `O` | ROI Window/Level |
+| `S` | ROI Statistics |
+| `D` | Ruler (distance) |
+| `N` | Angle |
+| `E` | Eraser |
+
+### Display
+
+| Key | Action |
+|-----|--------|
+| `A` | Auto window/level |
+| `I` | Invert image |
+| `F` | Fit to window |
+| `R` | Reset view (zoom, pan, W/L) |
+| `H` | Flip horizontal |
+| `]` or `.` | Rotate clockwise 90° |
+| `[` or `,` | Rotate counter-clockwise 90° |
+
+### Overlays & Multi-Panel
+
+| Key | Action |
+|-----|--------|
+| `T` | Toggle DICOM tag inspector |
+| `X` | Toggle cross-reference lines |
+| `L` | Toggle synchronized scrolling |
+| `Shift` (hold) | Show group selection overlay |
+| `Escape` | Clear group selection |
+
+### Mouse Actions
+
+| Input | Action |
+|-------|--------|
+| Left-click | Activate panel / tool action |
+| Right-drag | Adjust Window/Level |
+| Scroll wheel | Navigate slices |
+| Option/Ctrl + Left-drag | Pan (any tool) |
+| Option/Ctrl + Scroll | Zoom in/out |
+| Shift (hold) + Click | Toggle panel group selection |
+| Double-click | Toggle fullscreen panel |
+| Drag from sidebar | Assign series to panel |
+| Drag from Finder | Open DICOM file/folder |
 
 ## Architecture
 
@@ -57,6 +133,7 @@ Sources/
 │   ├── MetalVolumeRenderer.swift # GPU MIP/MinIP/Average via Metal compute
 │   ├── VolumeData.swift          # 3D voxel buffer with affine transforms
 │   ├── VolumeToolbar.swift       # MPR/MIP mode controls per panel
+│   ├── HelpView.swift            # In-app help viewer
 │   ├── TagView.swift             # DICOM tag list view
 │   ├── Extensions.swift          # Collection safe-subscript helper
 │   └── WindowAccessor.swift      # NSWindow customization (hidden titlebar)
@@ -71,6 +148,7 @@ Sources/
 - **Dual Parser Strategy**: A fast pure-Swift parser (`SimpleDICOM.swift`) handles tag reading and metadata extraction during directory scanning, while the DCMTK wrapper handles pixel data decoding for complex transfer syntaxes.
 - **Panel-Based Architecture**: Each panel (`PanelState`) owns its own image, W/L, zoom, and metadata state. The model (`DICOMModel`) manages shared resources (series data, caches, queues) and coordinates between panels.
 - **Spatial Synchronization**: Linked scrolling uses physical z-location matching rather than proportional index matching, so panels showing different series display the same anatomical position.
+- **NSView for Interaction**: Mouse gesture handling uses `NSViewRepresentable` wrapping a custom `NSView` subclass for reliable AppKit-level event handling (W/L drag, zoom, pan, annotations).
 
 ## Building
 
@@ -125,6 +203,7 @@ OpenDicomViewer/
 │   ├── build_native.sh       # Build + sign + package (with code signing)
 │   ├── package_app.sh        # Build + package (without signing)
 │   └── OpenDicomViewer.entitlements
+├── HELP.md                   # Full feature documentation
 ├── Package.swift             # Swift Package Manager manifest
 ├── AppIcon.icns              # Application icon
 ├── LICENSE                   # MIT License
