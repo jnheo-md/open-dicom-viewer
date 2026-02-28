@@ -26,6 +26,7 @@ import Combine
 import DCMTKWrapper
 import AppKit
 import simd
+import UniformTypeIdentifiers
 
 // MARK: - Data Structures
 struct DicomImageContext: Identifiable, Equatable {
@@ -95,6 +96,9 @@ class DICOMModel: ObservableObject {
     @Published var tags: [DicomElement] = []
     @Published var errorMessage: String?
     @Published var isLoading: Bool = false
+
+    // Active tool selection
+    @Published var activeTool: ActiveTool = .select
     
     // Series Management
     @Published var allSeries: [DicomSeries] = []
@@ -160,6 +164,8 @@ class DICOMModel: ObservableObject {
     @Published var panels: [PanelState] = []
     @Published var activePanelID: UUID = UUID()
     @Published var showCrossReference: Bool = false
+    @Published var showTags: Bool = false
+    @Published var showHelp: Bool = false
     @Published var synchronizedScrolling: Bool = false {
         didSet {
             guard synchronizedScrolling, let source = activePanel else { return }
@@ -288,11 +294,36 @@ class DICOMModel: ObservableObject {
     /// GPU renderer for MIP and volume rendering (lazy init)
     lazy var metalRenderer: MetalVolumeRenderer? = MetalVolumeRenderer()
 
+    // Shift-key state for group selection overlay
+    @Published var isShiftHeld: Bool = false
+    private var flagsMonitor: Any?
+
     // MARK: - Initialization
     init() {
         let firstPanel = PanelState()
         self.panels = [firstPanel]
         self.activePanelID = firstPanel.id
+
+        // Monitor Shift key globally for group selection overlay
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self = self else { return event }
+            let shiftDown = event.modifierFlags.contains(.shift)
+            self.isShiftHeld = shiftDown
+            // When Shift is released, clear group if ≤1 panel selected
+            if !shiftDown {
+                let selectedCount = self.panels.filter(\.isGroupSelected).count
+                if selectedCount <= 1 {
+                    self.clearGroupSelection()
+                }
+            }
+            return event
+        }
+    }
+
+    deinit {
+        if let monitor = flagsMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
     }
     
     // Helper for Thumbnail Preview
@@ -545,6 +576,22 @@ class DICOMModel: ObservableObject {
     }
     
     // MARK: - Load Methods
+
+    /// Show an Open panel and load the selected DICOM file or folder.
+    func openFolder() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [
+            .init(filenameExtension: "dcm")!,
+            .folder
+        ]
+        if panel.runModal() == .OK, let url = panel.url {
+            load(url: url)
+        }
+    }
+
     func load(url: URL) {
         print("Loading URL: \(url.path)")
         let secured = url.startAccessingSecurityScopedResource()
@@ -1630,7 +1677,11 @@ class DICOMModel: ObservableObject {
                              if let first = self.allSeries[self.currentSeriesIndex].images.first {
                                  // Only reload if url changed to avoid redundant processing
                                  if first.url != currentImgURL {
-                                     self.loadSingleFile(first.url)
+                                     if let panel = self.activePanel {
+                                         self.loadSingleFileForPanel(first.url, panel: panel)
+                                     } else {
+                                         self.loadSingleFile(first.url)
+                                     }
                                  }
                              }
                         } else {
@@ -1666,7 +1717,11 @@ class DICOMModel: ObservableObject {
                              self.currentImageIndex = 0
                              // Trigger load for the very first image found
                              if let first = self.allSeries.first?.images.first {
-                                 self.loadSingleFile(first.url)
+                                 if let panel = self.activePanel {
+                                     self.assignSeriesToPanel(panel, seriesIndex: 0)
+                                 } else {
+                                     self.loadSingleFile(first.url)
+                                 }
                              }
                              print("Target not found or selection invalid. Defaulting to Series 0, Image 0.")
                          }
@@ -1703,7 +1758,13 @@ class DICOMModel: ObservableObject {
                                 self.allSeries = [tempSeries]
                                 self.currentSeriesIndex = 0
                                 self.currentImageIndex = 0 // Explicitly set 0
-                                self.loadSingleFile(context.url)
+                                // Use the panel-specific loading path (not the legacy loadSingleFile)
+                                // to avoid race conditions with scan-time updateUI re-loads
+                                if let panel = self.activePanel {
+                                    self.assignSeriesToPanel(panel, seriesIndex: 0)
+                                } else {
+                                    self.loadSingleFile(context.url)
+                                }
                             }
                         }
                     }
@@ -1952,7 +2013,11 @@ class DICOMModel: ObservableObject {
     /// Called after loadSingleFile completes so that the active panel mirrors legacy state.
     private func syncLegacyStateToActivePanel() {
         guard let panel = activePanel else { return }
-        panel.image = self.image
+        if let img = self.image {
+            panel.setDisplayImage(img)
+        } else {
+            panel.image = nil
+        }
         panel.rawPixelData = self.rawPixelData
         panel.dcmtkImage = self.dcmtkImage
         panel.imageWidth = self.imageWidth
@@ -2060,6 +2125,30 @@ class DICOMModel: ObservableObject {
     func invertForPanel(_ panel: PanelState?) {
         guard let panel = panel else { return }
         panel.isInverted.toggle()
+    }
+
+    /// Rotate image 90° clockwise
+    func rotateClockwiseForPanel(_ panel: PanelState?) {
+        guard let panel = panel else { return }
+        panel.rotationSteps = (panel.rotationSteps + 1) % 4
+    }
+
+    /// Rotate image 90° counter-clockwise
+    func rotateCounterClockwiseForPanel(_ panel: PanelState?) {
+        guard let panel = panel else { return }
+        panel.rotationSteps = (panel.rotationSteps + 3) % 4
+    }
+
+    /// Flip image horizontally
+    func flipHorizontalForPanel(_ panel: PanelState?) {
+        guard let panel = panel else { return }
+        panel.isFlippedH.toggle()
+    }
+
+    /// Flip image vertically
+    func flipVerticalForPanel(_ panel: PanelState?) {
+        guard let panel = panel else { return }
+        panel.isFlippedV.toggle()
     }
 
     // MARK: - Multi-Panel Management
@@ -2515,17 +2604,17 @@ class DICOMModel: ObservableObject {
                     if preservedWW > 0 {
                         if let dcmtk = cachedDCMTK,
                            let rerendered = dcmtk.renderImage(withWidth: 0, height: 0, ww: preservedWW, wc: preservedWC) {
-                            panel.image = rerendered
+                            panel.setDisplayImage(rerendered)
                         } else if let raw = cachedRaw, panel.imageWidth > 0,
                                   let rerendered = self.renderImage(width: panel.imageWidth, height: panel.imageHeight, pixelData: raw, ww: preservedWW, wc: preservedWC,
                                                                     bits: panel.bitDepth, spp: panel.samples, signed: panel.isSigned, mono1: panel.isMonochrome1) {
                             // DCMTK object was evicted by NSCache; fall back to raw data rendering
-                            panel.image = rerendered
+                            panel.setDisplayImage(rerendered)
                         } else {
-                            panel.image = cachedImage
+                            panel.setDisplayImage(cachedImage)
                         }
                     } else {
-                        panel.image = cachedImage
+                        panel.setDisplayImage(cachedImage)
                         // Set W/L from cache params so right-drag sensitivity works properly.
                         // Without this, panel.windowWidth stays at 0 and drag adjustment
                         // produces extreme jumps on MR images without DICOM W/L headers.
@@ -2622,12 +2711,12 @@ class DICOMModel: ObservableObject {
                             panel.windowWidth = preservedWW
                             panel.windowCenter = preservedWC
                             if let rerendered = dcmObj.renderImage(withWidth: 0, height: 0, ww: preservedWW, wc: preservedWC) {
-                                panel.image = rerendered
+                                panel.setDisplayImage(rerendered)
                             } else {
-                                panel.image = nsImage
+                                panel.setDisplayImage(nsImage)
                             }
                         } else {
-                            panel.image = nsImage
+                            panel.setDisplayImage(nsImage)
                             panel.windowWidth = ww
                             panel.windowCenter = wc
                         }
@@ -2686,7 +2775,7 @@ class DICOMModel: ObservableObject {
 
                         if let rendered = self.renderImage(width: j2kW, height: j2kH, pixelData: j2kData, ww: renderWW, wc: renderWC,
                                                            bits: j2kD, spp: j2kS, signed: j2kSigned.boolValue, mono1: false) {
-                            panel.image = rendered
+                            panel.setDisplayImage(rendered)
                             if preservedWW <= 0 {
                                 self.imageCache.setObject(rendered, forKey: url as NSURL)
                             }
@@ -2744,7 +2833,7 @@ class DICOMModel: ObservableObject {
 
                             if let rendered = self.renderImage(width: rawW, height: rawH, pixelData: rawData, ww: renderWW, wc: renderWC,
                                                                bits: rawD, spp: rawS, signed: rawSigned, mono1: rawMono1) {
-                                panel.image = rendered
+                                panel.setDisplayImage(rendered)
                                 if preservedWW <= 0 {
                                     self.imageCache.setObject(rendered, forKey: url as NSURL)
                                 }
@@ -2796,12 +2885,12 @@ class DICOMModel: ObservableObject {
         case .slice2D:
             if let dcmObj = panel.dcmtkImage {
                 if let newImg = dcmObj.renderImage(withWidth: 0, height: 0, ww: panel.windowWidth, wc: panel.windowCenter) {
-                    panel.image = newImg
+                    panel.setDisplayImage(newImg)
                 }
             } else if let data = panel.rawPixelData {
                 if let newImg = renderImage(width: panel.imageWidth, height: panel.imageHeight, pixelData: data, ww: panel.windowWidth, wc: panel.windowCenter,
                                             bits: panel.bitDepth, spp: panel.samples, signed: panel.isSigned, mono1: panel.isMonochrome1) {
-                    panel.image = newImg
+                    panel.setDisplayImage(newImg)
                 }
             }
         case .mprSagittal, .mprCoronal, .mip:
@@ -2818,7 +2907,7 @@ class DICOMModel: ObservableObject {
                     pixelSpacingY: panel.pixelSpacing?.0 ?? 1
                 )
                 if let newImg = MPREngine.renderSlice(slice, ww: panel.windowWidth, wc: panel.windowCenter, invert: panel.isInverted) {
-                    panel.image = newImg
+                    panel.setDisplayImage(newImg)
                 }
             }
         }
@@ -2836,23 +2925,27 @@ class DICOMModel: ObservableObject {
 
     /// Compute min/max pixel values within a rectangular subregion of the image data.
     private func computeMinMaxInRect(data: Data, width: Int, rect: CGRect, isSigned: Bool, bits: Int) -> (Double, Double) {
+        guard width > 0 else { return (0, 0) }
         var minVal: Double = Double.greatestFiniteMagnitude
         var maxVal: Double = -Double.greatestFiniteMagnitude
 
         let startCol = max(0, Int(rect.minX))
         let endCol = min(width, Int(ceil(rect.maxX)))
         let startRow = max(0, Int(rect.minY))
+        guard endCol > startCol else { return (0, 0) }
 
         if bits > 16 { // 32-bit
             let bytesPerPixel = 4
             let totalPixels = data.count / bytesPerPixel
             let height = totalPixels / max(1, width)
             let endRow = min(height, Int(ceil(rect.maxY)))
+            guard endRow > startRow else { return (0, 0) }
             data.withUnsafeBytes { rawBuffer in
                 guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt32.self) else { return }
                 for row in startRow..<endRow {
                     for col in startCol..<endCol {
                         let i = row * width + col
+                        guard i >= 0, i < totalPixels else { continue }
                         let v: Double = isSigned ? Double(Int32(bitPattern: ptr[i])) : Double(ptr[i])
                         if v < minVal { minVal = v }
                         if v > maxVal { maxVal = v }
@@ -2864,11 +2957,13 @@ class DICOMModel: ObservableObject {
             let totalPixels = data.count / bytesPerPixel
             let height = totalPixels / max(1, width)
             let endRow = min(height, Int(ceil(rect.maxY)))
+            guard endRow > startRow else { return (0, 0) }
             data.withUnsafeBytes { rawBuffer in
                 guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt16.self) else { return }
                 for row in startRow..<endRow {
                     for col in startCol..<endCol {
                         let i = row * width + col
+                        guard i >= 0, i < totalPixels else { continue }
                         let v: Double = isSigned ? Double(Int16(bitPattern: ptr[i])) : Double(ptr[i])
                         if v < minVal { minVal = v }
                         if v > maxVal { maxVal = v }
@@ -2876,13 +2971,16 @@ class DICOMModel: ObservableObject {
                 }
             }
         } else { // 8-bit
-            let height = data.count / max(1, width)
+            let totalPixels = data.count
+            let height = totalPixels / max(1, width)
             let endRow = min(height, Int(ceil(rect.maxY)))
+            guard endRow > startRow else { return (0, 0) }
             data.withUnsafeBytes { rawBuffer in
                 guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
                 for row in startRow..<endRow {
                     for col in startCol..<endCol {
                         let i = row * width + col
+                        guard i >= 0, i < totalPixels else { continue }
                         let v = Double(ptr[i])
                         if v < minVal { minVal = v }
                         if v > maxVal { maxVal = v }
@@ -2902,6 +3000,56 @@ class DICOMModel: ObservableObject {
         let newWW = max(1.0, maxVal - minVal)
         let newWC = minVal + (newWW / 2.0)
         adjustWindowLevelForPanel(panel, deltaWidth: newWW - panel.windowWidth, deltaCenter: newWC - panel.windowCenter)
+    }
+
+    /// Compute HU statistics for a pixel-coordinate rectangle on a panel
+    func computeROIStats(panel: PanelState, rect: CGRect) -> (mean: Double, max: Double, min: Double, stdDev: Double, count: Int)? {
+        guard let data = panel.rawPixelData else { return nil }
+        let w = panel.imageWidth
+        let h = panel.imageHeight
+        let minX = max(0, Int(rect.minX))
+        let minY = max(0, Int(rect.minY))
+        let maxX = min(w - 1, Int(rect.maxX))
+        let maxY = min(h - 1, Int(rect.maxY))
+        guard maxX > minX, maxY > minY else { return nil }
+
+        var values: [Double] = []
+        values.reserveCapacity((maxX - minX) * (maxY - minY))
+
+        data.withUnsafeBytes { raw in
+            for py in minY...maxY {
+                for px in minX...maxX {
+                    let index = py * w + px
+                    var val: Double = 0
+                    if panel.bitDepth > 8 {
+                        let byteIndex = index * 2
+                        if byteIndex + 1 < data.count {
+                            if let ptr = raw.baseAddress?.assumingMemoryBound(to: UInt16.self) {
+                                if panel.isSigned {
+                                    val = Double(Int16(bitPattern: ptr[index]))
+                                } else {
+                                    val = Double(ptr[index])
+                                }
+                            }
+                        }
+                    } else if index < data.count {
+                        val = Double(raw[index])
+                    }
+                    values.append(val)
+                }
+            }
+        }
+
+        guard !values.isEmpty else { return nil }
+        let count = values.count
+        let sum = values.reduce(0, +)
+        let mean = sum / Double(count)
+        let maxVal = values.max() ?? 0
+        let minVal = values.min() ?? 0
+        let variance = values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(count)
+        let stdDev = sqrt(variance)
+
+        return (mean: mean, max: maxVal, min: minVal, stdDev: stdDev, count: count)
     }
 
     /// Save view state (zoom/pan) for a panel
@@ -3220,7 +3368,11 @@ class DICOMModel: ObservableObject {
 
             guard let volume = volume else {
                 panel.isLoading = false
-                panel.errorMessage = "Volume build failed — series may lack spatial metadata or have too few slices"
+                if self.isScanning {
+                    panel.errorMessage = "Volume build failed — directory is still scanning. Please wait for scanning to complete and try again."
+                } else {
+                    panel.errorMessage = "Volume build failed — series may lack spatial metadata or have too few slices"
+                }
                 return
             }
 
@@ -3262,7 +3414,7 @@ class DICOMModel: ObservableObject {
             let wc = (panel.windowWidth > 0) ? panel.windowCenter : (panel.initialWindowWidth > 0 ? panel.initialWindowCenter : 500)
 
             if let image = MPREngine.renderSlice(mprSlice, ww: ww, wc: wc, invert: panel.isInverted) {
-                panel.image = image
+                panel.setDisplayImage(image)
                 panel.imageWidth = mprSlice.width
                 panel.imageHeight = mprSlice.height
                 panel.rawPixelData = mprSlice.pixelData
@@ -3372,6 +3524,9 @@ class DICOMModel: ObservableObject {
     func setPanelMode(_ panel: PanelState, mode: PanelMode) {
         panel.panelMode = mode
 
+        // Cancel any pending 2D loads to prevent them from overwriting MPR/MIP panel state
+        panel.loadingQueue.cancelAllOperations()
+
         switch mode {
         case .slice2D:
             // Reload current 2D slice
@@ -3414,7 +3569,11 @@ class DICOMModel: ObservableObject {
 
             guard let volume = volume else {
                 panel.isLoading = false
-                panel.errorMessage = "Volume build failed — series may lack spatial metadata or have too few slices"
+                if self.isScanning {
+                    panel.errorMessage = "Volume build failed — directory is still scanning. Please wait for scanning to complete and try again."
+                } else {
+                    panel.errorMessage = "Volume build failed — series may lack spatial metadata or have too few slices"
+                }
                 return
             }
 
@@ -3443,7 +3602,7 @@ class DICOMModel: ObservableObject {
             }
 
             if let image = MPREngine.renderSlice(slice, ww: ww, wc: wc, invert: panel.isInverted) {
-                panel.image = image
+                panel.setDisplayImage(image)
                 panel.imageWidth = slice.width
                 panel.imageHeight = slice.height
                 panel.rawPixelData = slice.pixelData

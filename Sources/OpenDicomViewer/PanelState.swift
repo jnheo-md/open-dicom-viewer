@@ -69,6 +69,61 @@ enum PanelMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - Active Tool
+enum ActiveTool: String, CaseIterable, Identifiable {
+    case select = "Select"
+    case pan = "Pan"
+    case windowLevel = "W/L"
+    case zoom = "Zoom"
+    case roiWL = "ROI W/L"
+    case roiStats = "ROI Stats"
+    case ruler = "Ruler"
+    case angle = "Angle"
+    case eraser = "Eraser"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .select: return "cursorarrow"
+        case .pan: return "arrow.up.and.down.and.arrow.left.and.right"
+        case .windowLevel: return "sun.max"
+        case .zoom: return "magnifyingglass"
+        case .roiWL: return "rectangle.dashed"
+        case .roiStats: return "chart.bar.xaxis"
+        case .ruler: return "ruler"
+        case .angle: return "angle"
+        case .eraser: return "eraser"
+        }
+    }
+
+    var shortcutHint: String {
+        switch self {
+        case .select: return "V"
+        case .pan: return "P"
+        case .windowLevel: return "W"
+        case .zoom: return "Z"
+        case .roiWL: return "O"
+        case .roiStats: return "S"
+        case .ruler: return "D"
+        case .angle: return "N"
+        case .eraser: return "E"
+        }
+    }
+}
+
+// MARK: - Annotations
+enum AnnotationType {
+    case ruler(start: CGPoint, end: CGPoint, distanceMM: Double)
+    case angle(vertex: CGPoint, arm1: CGPoint, arm2: CGPoint, degrees: Double)
+    case roiStats(rect: CGRect, mean: Double, max: Double, min: Double, stdDev: Double, count: Int)
+}
+
+struct Annotation: Identifiable {
+    let id = UUID()
+    let type: AnnotationType
+}
+
 // MARK: - Panel State
 /// Per-panel observable state. Each panel in the multi-panel viewer gets its own instance.
 /// Shared resources (caches, queues, series data) remain in DICOMModel.
@@ -91,6 +146,20 @@ class PanelState: ObservableObject, Identifiable {
 
     // Rendered Image
     @Published var image: NSImage? = nil
+
+    // Display dimensions (from NSImage.size, which may differ from raw pixel
+    // dimensions for MPR views with non-isotropic voxels)
+    var displayImageWidth: CGFloat = 0
+    var displayImageHeight: CGFloat = 0
+
+    /// Set the display image and update display dimensions from its size.
+    /// Use this instead of assigning `image` directly so that overlay
+    /// coordinate transforms use the correct (aspect-ratio-corrected) size.
+    func setDisplayImage(_ img: NSImage) {
+        image = img
+        displayImageWidth = img.size.width
+        displayImageHeight = img.size.height
+    }
 
     // Window/Level
     @Published var windowWidth: Double = 0
@@ -166,6 +235,14 @@ class PanelState: ObservableObject, Identifiable {
     @Published var isFlippedH: Bool = false      // Horizontal flip (left-right)
     @Published var isFlippedV: Bool = false       // Vertical flip (up-down)
 
+    // Annotations
+    @Published var annotations: [Annotation] = []
+
+    // In-progress annotation preview
+    @Published var rulerPreviewStart: CGPoint? = nil
+    @Published var rulerPreviewEnd: CGPoint? = nil
+    @Published var anglePreviewPoints: [CGPoint] = []
+
     /// Reset panel to empty state
     func reset() {
         seriesIndex = -1
@@ -175,6 +252,8 @@ class PanelState: ObservableObject, Identifiable {
         mipSlabPosition = 0
         mipSlabThickness = 10
         image = nil
+        displayImageWidth = 0
+        displayImageHeight = 0
         windowWidth = 0
         windowCenter = 0
         initialWindowWidth = 0
@@ -216,5 +295,9 @@ class PanelState: ObservableObject, Identifiable {
         rotationSteps = 0
         isFlippedH = false
         isFlippedV = false
+        annotations = []
+        rulerPreviewStart = nil
+        rulerPreviewEnd = nil
+        anglePreviewPoints = []
     }
 }

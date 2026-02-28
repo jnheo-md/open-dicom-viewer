@@ -23,13 +23,12 @@ import QuartzCore
 
 struct ContentView: View {
     @ObservedObject var model: DICOMModel
-    @State private var showTags: Bool = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @FocusState private var isFocused: Bool
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(model: model, showTags: $showTags, columnVisibility: $columnVisibility)
+            SidebarView(model: model, columnVisibility: $columnVisibility)
             .navigationSplitViewColumnWidth(min: 250, ideal: 300)
             .toolbar(removing: .sidebarToggle)
         } detail: {
@@ -67,11 +66,11 @@ struct ContentView: View {
                         HStack(spacing: 8) {
                             LayoutToolbar(model: model)
 
-                            Button(action: { showTags.toggle() }) {
+                            Button(action: { model.showTags.toggle() }) {
                                 ZStack(alignment: .bottomTrailing) {
                                     Image(systemName: "tag")
                                         .font(.system(size: 16))
-                                        .foregroundStyle(showTags ? .white : .secondary)
+                                        .foregroundStyle(model.showTags ? .white : .secondary)
                                         .padding(8)
 
                                     Text("T")
@@ -88,6 +87,17 @@ struct ContentView: View {
                     }
                     .padding()
 
+                    Spacer()
+                }
+
+                // Left-side tool palette
+                VStack {
+                    Spacer()
+                    HStack {
+                        ToolPalette(model: model)
+                            .padding(.leading, 8)
+                        Spacer()
+                    }
                     Spacer()
                 }
             }
@@ -176,19 +186,13 @@ struct ContentView: View {
                 case "l":
                     model.synchronizedScrolling.toggle()
                     return .handled
-                // G = Toggle group selection on active panel
-                case "g":
-                    if let panel = model.activePanel {
-                        model.toggleGroupSelection(for: panel)
-                    }
-                    return .handled
                 // X = Toggle cross-reference lines
                 case "x":
                     model.showCrossReference.toggle()
                     return .handled
                 // T = Toggle DICOM tags
                 case "t":
-                    showTags.toggle()
+                    model.showTags.toggle()
                     return .handled
                 // I = Invert
                 case "i":
@@ -204,27 +208,49 @@ struct ContentView: View {
                         model.autoWindowLevelForPanel(panel)
                     }
                     return .handled
-                // O = ROI Auto W/L mode
+                // Tool selection shortcuts
                 case "o":
-                    if let panel = model.activePanel {
-                        panel.isROIMode.toggle()
-                    }
+                    model.activeTool = .roiWL
                     return .handled
-                default: break
-                }
-            }
-
-            // Shift+G = Select/deselect all panels in group
-            if press.modifiers == .shift {
-                switch press.characters.lowercased() {
-                case "g":
-                    let allSelected = model.panels.allSatisfy { $0.isGroupSelected }
-                    if allSelected {
-                        model.clearGroupSelection()
-                    } else {
-                        let allIDs = Set(model.panels.map { $0.id })
-                        model.setGroupSelection(panelIDs: allIDs)
-                    }
+                case "s":
+                    model.activeTool = .roiStats
+                    return .handled
+                case "d":
+                    model.activeTool = .ruler
+                    return .handled
+                case "n":
+                    model.activeTool = .angle
+                    return .handled
+                case "e":
+                    model.activeTool = .eraser
+                    return .handled
+                // ] or . = Rotate clockwise 90°
+                case "]", ".":
+                    model.rotateClockwiseForPanel(model.activePanel)
+                    return .handled
+                // [ or , = Rotate counter-clockwise 90°
+                case "[", ",":
+                    model.rotateCounterClockwiseForPanel(model.activePanel)
+                    return .handled
+                // W = Window/Level tool
+                case "w":
+                    model.activeTool = .windowLevel
+                    return .handled
+                // V = Select tool (default)
+                case "v":
+                    model.activeTool = .select
+                    return .handled
+                // P = Pan tool
+                case "p":
+                    model.activeTool = .pan
+                    return .handled
+                // Z = Zoom tool
+                case "z":
+                    model.activeTool = .zoom
+                    return .handled
+                // H = Flip horizontal
+                case "h":
+                    model.flipHorizontalForPanel(model.activePanel)
                     return .handled
                 default: break
                 }
@@ -240,13 +266,16 @@ struct ContentView: View {
 
             return .ignored
         }
-        .inspector(isPresented: $showTags) {
+        .inspector(isPresented: $model.showTags) {
             let activeTags = model.activePanel?.tags ?? []
             if activeTags.isEmpty {
                 ContentUnavailableView("No Tags", systemImage: "tag.slash")
             } else {
                 TagView(tags: activeTags)
             }
+        }
+        .sheet(isPresented: $model.showHelp) {
+            HelpView()
         }
         .preferredColorScheme(.dark)
         .background(WindowAccessor())
@@ -279,7 +308,6 @@ struct ContentView: View {
 
 struct SidebarView: View {
     @ObservedObject var model: DICOMModel
-    @Binding var showTags: Bool
     @Binding var columnVisibility: NavigationSplitViewVisibility
     
     var body: some View {
@@ -317,14 +345,7 @@ struct SidebarView: View {
     }
     
     private func openFile() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [UTType(filenameExtension: "dcm")!, .folder]
-        if panel.runModal() == .OK, let url = panel.url {
-            model.load(url: url)
-        }
+        model.openFolder()
     }
 }
 

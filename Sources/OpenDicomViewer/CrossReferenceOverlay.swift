@@ -75,8 +75,8 @@ private struct CrossRefLineView: View {
     }
 
     private func pixelToScreen(_ pixel: CGPoint) -> CGPoint {
-        let imgW = CGFloat(max(1, displayPanel.imageWidth))
-        let imgH = CGFloat(max(1, displayPanel.imageHeight))
+        let imgW = max(1, displayPanel.displayImageWidth)
+        let imgH = max(1, displayPanel.displayImageHeight)
         let vw = viewSize.width
         let vh = viewSize.height
 

@@ -153,30 +153,34 @@ struct PanelView: View {
                 .zIndex(5)
             }
 
-            // Group selection button (top-right, multi-panel only)
-            if model.panels.count > 1 && panel.seriesIndex >= 0 {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            model.toggleGroupSelection(for: panel)
-                        }) {
-                            Image(systemName: panel.isGroupSelected ? "square.stack.3d.up.fill" : "square.stack.3d.up.slash")
-                                .font(.system(size: 12))
-                                .foregroundStyle(panel.isGroupSelected ? .orange : .secondary)
-                                .frame(width: 24, height: 24)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(panel.isGroupSelected ? Color.orange.opacity(0.2) : Color.black.opacity(0.4))
-                                )
+            // Shift-overlay for group selection (multi-panel only)
+            if model.isShiftHeld && model.panels.count > 1 {
+                ZStack {
+                    if panel.isGroupSelected {
+                        Color.orange.opacity(0.25)
+                        VStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.orange)
+                            Text("Selected")
+                                .font(.headline)
+                                .foregroundStyle(.orange)
                         }
-                        .buttonStyle(.plain)
-                        .help(panel.isGroupSelected ? "Remove from scroll group (Shift+Click or G)" : "Add to scroll group (Shift+Click or G)")
-                        .padding(6)
+                    } else {
+                        Color.black.opacity(0.5)
+                        VStack(spacing: 8) {
+                            Image(systemName: "hand.tap")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.white.opacity(0.7))
+                            Text("Click to select for\nsimultaneous scrolling")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                        }
                     }
-                    Spacer()
                 }
-                .zIndex(6)
+                .allowsHitTesting(false)
+                .zIndex(500)
             }
 
             // Cross-reference lines overlay
@@ -189,6 +193,12 @@ struct PanelView: View {
             if panel.image != nil, let roiRect = panel.roiRect {
                 ROIOverlay(panel: panel, roiRect: roiRect)
                     .zIndex(12)
+            }
+
+            // Annotation overlay (rulers, angles, ROI stats)
+            if panel.image != nil {
+                AnnotationOverlay(panel: panel)
+                    .zIndex(13)
             }
 
             // Orientation labels (A/P/R/L/S/I)
@@ -333,6 +343,10 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         private var scrollAccumulator: CGFloat = 0.0
         private var roiStartPixel: CGPoint?  // ROI drag start in pixel coords
         private var isCrosshairCursorActive: Bool = false
+
+        // In-progress annotation state
+        private var rulerStartPixel: CGPoint?
+        private var anglePoints: [CGPoint] = []
 
         // Prevent image dimensions from influencing SwiftUI layout
         override var intrinsicContentSize: NSSize {
@@ -524,13 +538,40 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         override var acceptsFirstResponder: Bool { true }
 
         func updateROICursor() {
-            let wantsCrosshair = panel?.isROIMode == true
-            if wantsCrosshair && !isCrosshairCursorActive {
-                NSCursor.crosshair.push()
+            let tool = model?.activeTool ?? .select
+
+            let desiredCursor: NSCursor
+            switch tool {
+            case .select:
+                desiredCursor = .arrow
+            case .pan:
+                desiredCursor = .openHand
+            case .windowLevel:
+                desiredCursor = .resizeUpDown
+            case .zoom:
+                desiredCursor = .crosshair
+            case .roiWL, .roiStats, .ruler, .angle:
+                desiredCursor = .crosshair
+            case .eraser:
+                desiredCursor = .disappearingItem
+            }
+
+            if tool == .select {
+                // Default arrow cursor — pop any custom cursor
+                if isCrosshairCursorActive {
+                    NSCursor.pop()
+                    isCrosshairCursorActive = false
+                }
+                return
+            }
+
+            if !isCrosshairCursorActive {
+                desiredCursor.push()
                 isCrosshairCursorActive = true
-            } else if !wantsCrosshair && isCrosshairCursorActive {
+            } else {
+                // Pop previous and push new
                 NSCursor.pop()
-                isCrosshairCursorActive = false
+                desiredCursor.push()
             }
         }
 
@@ -569,11 +610,10 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         }
 
         override func mouseDown(with event: NSEvent) {
-            // Shift+click: toggle group selection for simultaneous scrolling
-            if event.modifierFlags.contains(.shift), let panel = panel, let model = model {
+            // Shift+click: toggle group selection via overlay
+            if event.modifierFlags.contains(.shift), let panel = panel, let model = model, model.panels.count > 1 {
                 DispatchQueue.main.async {
-                    model.toggleGroupSelection(for: panel)
-                    model.activePanelID = panel.id
+                    panel.isGroupSelected.toggle()
                 }
                 return
             }
@@ -585,13 +625,139 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 }
             }
 
-            // ROI mode: start drag
-            if let panel = panel, panel.isROIMode {
+            guard let model = model, let panel = panel else { return }
+
+            // Modifier overrides: Option/Control + left-click starts pan
+            let mods = event.modifierFlags.intersection([.option, .control])
+            if !mods.isEmpty {
+                lastDragLocation = event.locationInWindow
+                return
+            }
+
+            switch model.activeTool {
+            case .select:
+                break
+
+            case .pan:
+                // Just activate (handled above)
+                break
+
+            case .windowLevel:
+                lastDragLocation = event.locationInWindow
+
+            case .zoom:
+                lastDragLocation = event.locationInWindow
+
+            case .roiWL, .roiStats:
                 if let px = screenToPixel(event) {
                     roiStartPixel = px
                     panel.roiRect = CGRect(x: px.x, y: px.y, width: 0, height: 0)
                 }
+
+            case .ruler:
+                if let px = screenToPixel(event) {
+                    if rulerStartPixel == nil {
+                        // First click: record start
+                        rulerStartPixel = px
+                        panel.rulerPreviewStart = px
+                        panel.rulerPreviewEnd = px
+                    } else {
+                        // Second click: finalize ruler
+                        let start = rulerStartPixel!
+                        let dx = Double(px.x - start.x)
+                        let dy = Double(px.y - start.y)
+                        var distance: Double
+                        if let ps = panel.pixelSpacing {
+                            distance = sqrt(pow(dx * ps.1, 2) + pow(dy * ps.0, 2))
+                        } else {
+                            distance = sqrt(dx * dx + dy * dy)
+                        }
+                        let annotation = Annotation(type: .ruler(start: start, end: px, distanceMM: distance))
+                        panel.annotations.append(annotation)
+                        // Clear preview
+                        rulerStartPixel = nil
+                        panel.rulerPreviewStart = nil
+                        panel.rulerPreviewEnd = nil
+                    }
+                }
+
+            case .angle:
+                if let px = screenToPixel(event) {
+                    anglePoints.append(px)
+                    panel.anglePreviewPoints = anglePoints
+                    if anglePoints.count == 3 {
+                        // Compute angle using dot product
+                        let vertex = anglePoints[1]
+                        let arm1 = anglePoints[0]
+                        let arm2 = anglePoints[2]
+                        let v1 = CGPoint(x: arm1.x - vertex.x, y: arm1.y - vertex.y)
+                        let v2 = CGPoint(x: arm2.x - vertex.x, y: arm2.y - vertex.y)
+                        let dot = Double(v1.x * v2.x + v1.y * v2.y)
+                        let mag1 = sqrt(Double(v1.x * v1.x + v1.y * v1.y))
+                        let mag2 = sqrt(Double(v2.x * v2.x + v2.y * v2.y))
+                        var degrees = 0.0
+                        if mag1 > 0 && mag2 > 0 {
+                            let cosAngle = max(-1, min(1, dot / (mag1 * mag2)))
+                            degrees = acos(cosAngle) * 180.0 / .pi
+                        }
+                        let annotation = Annotation(type: .angle(vertex: vertex, arm1: arm1, arm2: arm2, degrees: degrees))
+                        panel.annotations.append(annotation)
+                        // Clear preview
+                        anglePoints = []
+                        panel.anglePreviewPoints = []
+                    }
+                }
+
+            case .eraser:
+                if let px = screenToPixel(event) {
+                    // Find nearest annotation and remove it
+                    let threshold: CGFloat = 15.0
+                    var bestIdx: Int? = nil
+                    var bestDist: CGFloat = .infinity
+                    for (i, ann) in panel.annotations.enumerated() {
+                        let dist = distanceToAnnotation(ann, from: px)
+                        if dist < bestDist {
+                            bestDist = dist
+                            bestIdx = i
+                        }
+                    }
+                    if let idx = bestIdx, bestDist < threshold {
+                        panel.annotations.remove(at: idx)
+                    }
+                }
             }
+        }
+
+        /// Compute minimum distance from a point to an annotation
+        private func distanceToAnnotation(_ annotation: Annotation, from point: CGPoint) -> CGFloat {
+            switch annotation.type {
+            case .ruler(let start, let end, _):
+                return pointToSegmentDistance(point, start, end)
+            case .angle(let vertex, let arm1, let arm2, _):
+                let d1 = pointToSegmentDistance(point, arm1, vertex)
+                let d2 = pointToSegmentDistance(point, vertex, arm2)
+                return min(d1, d2)
+            case .roiStats(let rect, _, _, _, _, _):
+                // Distance to rectangle edges
+                let closest = CGPoint(
+                    x: max(rect.minX, min(point.x, rect.maxX)),
+                    y: max(rect.minY, min(point.y, rect.maxY))
+                )
+                return hypot(point.x - closest.x, point.y - closest.y)
+            }
+        }
+
+        /// Distance from a point to a line segment
+        private func pointToSegmentDistance(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
+            let dx = b.x - a.x
+            let dy = b.y - a.y
+            let lenSq = dx * dx + dy * dy
+            if lenSq == 0 { return hypot(p.x - a.x, p.y - a.y) }
+            var t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq
+            t = max(0, min(1, t))
+            let projX = a.x + t * dx
+            let projY = a.y + t * dy
+            return hypot(p.x - projX, p.y - projY)
         }
 
         override func keyDown(with event: NSEvent) {
@@ -611,8 +777,8 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         }
 
         override func scrollWheel(with event: NSEvent) {
-            // Option+Scroll = Zoom (unchanged)
-            if event.modifierFlags.contains(.option) {
+            // Option/Control+Scroll or Zoom tool active = Zoom
+            if event.modifierFlags.contains(.option) || event.modifierFlags.contains(.control) || model?.activeTool == .zoom {
                 guard let layer = imageView.layer else { return }
                 let dy = event.deltaY
                 if dy == 0 { return }
@@ -699,42 +865,123 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         }
 
         override func mouseDragged(with event: NSEvent) {
-            guard let panel = panel else { return }
+            guard let panel = panel, let model = model else { return }
 
-            // ROI mode: update rectangle
-            if panel.isROIMode, let start = roiStartPixel {
-                if let current = screenToPixel(event) {
+            // Modifier overrides: Option/Control + left-drag = pan
+            let mods = event.modifierFlags.intersection([.option, .control])
+            if !mods.isEmpty {
+                guard let layer = imageView.layer else { return }
+                let dx = event.deltaX
+                let dy = -event.deltaY
+                layer.transform.m41 += CGFloat(dx)
+                layer.transform.m42 += CGFloat(dy)
+                saveState()
+                return
+            }
+
+            switch model.activeTool {
+            case .select:
+                break
+
+            case .pan:
+                // Left-click drag = pan
+                guard let layer = imageView.layer else { return }
+                let dx = event.deltaX
+                let dy = -event.deltaY
+                layer.transform.m41 += CGFloat(dx)
+                layer.transform.m42 += CGFloat(dy)
+                saveState()
+
+            case .windowLevel:
+                // W/L adjustment (same as right-drag)
+                guard let start = lastDragLocation else { return }
+                let current = event.locationInWindow
+                let dx = Double(current.x - start.x)
+                let dy = Double(current.y - start.y)
+                let currentWW = panel.windowWidth
+                let dynamicFactor = max(0.1, currentWW / 500.0)
+                let sensitivity: Double = 1.0 * dynamicFactor
+                model.adjustWindowLevelForPanel(panel, deltaWidth: dx * sensitivity, deltaCenter: dy * sensitivity)
+                applyFilters()
+                lastDragLocation = current
+
+            case .zoom:
+                // Drag up = zoom in, drag down = zoom out
+                guard let layer = imageView.layer, let start = lastDragLocation else { return }
+                let current = event.locationInWindow
+                let dy = current.y - start.y
+                let zoomSpeed: CGFloat = 0.005
+                let oldScale = layer.transform.m11
+                var newScale = oldScale + dy * zoomSpeed
+                newScale = max(0.1, min(10.0, newScale))
+                layer.transform.m11 = newScale
+                layer.transform.m22 = newScale
+                saveState()
+                lastDragLocation = current
+
+            case .roiWL, .roiStats:
+                // Update ROI rectangle
+                if let start = roiStartPixel, let current = screenToPixel(event) {
                     let x = min(start.x, current.x)
                     let y = min(start.y, current.y)
                     let w = abs(current.x - start.x)
                     let h = abs(current.y - start.y)
                     panel.roiRect = CGRect(x: x, y: y, width: w, height: h)
                 }
-                return
+
+            case .ruler:
+                // Update preview line endpoint
+                if rulerStartPixel != nil, let current = screenToPixel(event) {
+                    panel.rulerPreviewEnd = current
+                }
+
+            case .angle:
+                // Update preview line endpoint
+                if !anglePoints.isEmpty, let current = screenToPixel(event) {
+                    var preview = anglePoints
+                    preview.append(current)
+                    panel.anglePreviewPoints = preview
+                }
+
+            case .eraser:
+                break
             }
-
-            // Normal mode: left-click drag = pan
-            guard let layer = imageView.layer else { return }
-            let dx = event.deltaX
-            let dy = -event.deltaY
-
-            layer.transform.m41 += CGFloat(dx)
-            layer.transform.m42 += CGFloat(dy)
-            saveState()
         }
 
         override func mouseUp(with event: NSEvent) {
             guard let panel = panel, let model = model else { return }
 
-            // ROI mode: compute W/L from rectangle and apply
-            if panel.isROIMode, let rect = panel.roiRect, rect.width > 1 && rect.height > 1 {
-                model.autoWindowLevelForPanelROI(panel, rect: rect)
-            }
+            switch model.activeTool {
+            case .select:
+                break
 
-            // Clean up ROI state
-            roiStartPixel = nil
-            panel.roiRect = nil
-            panel.isROIMode = false
+            case .roiWL:
+                if let rect = panel.roiRect, rect.width > 1 && rect.height > 1 {
+                    model.autoWindowLevelForPanelROI(panel, rect: rect)
+                }
+                roiStartPixel = nil
+                panel.roiRect = nil
+
+            case .roiStats:
+                if let rect = panel.roiRect, rect.width > 1 && rect.height > 1 {
+                    if let stats = model.computeROIStats(panel: panel, rect: rect) {
+                        let annotation = Annotation(type: .roiStats(
+                            rect: rect,
+                            mean: stats.mean, max: stats.max, min: stats.min,
+                            stdDev: stats.stdDev, count: stats.count
+                        ))
+                        panel.annotations.append(annotation)
+                    }
+                }
+                roiStartPixel = nil
+                panel.roiRect = nil
+
+            case .windowLevel:
+                lastDragLocation = nil
+
+            default:
+                break
+            }
         }
 
         // MARK: - Mouse Tracking for HU Readout
@@ -892,8 +1139,8 @@ struct ROIOverlay: View {
     }
 
     private func pixelToScreen(_ pixel: CGPoint, viewSize: CGSize) -> CGPoint {
-        let imgW = CGFloat(max(1, panel.imageWidth))
-        let imgH = CGFloat(max(1, panel.imageHeight))
+        let imgW = max(1, panel.displayImageWidth)
+        let imgH = max(1, panel.displayImageHeight)
         let vw = viewSize.width
         let vh = viewSize.height
 
@@ -1329,6 +1576,221 @@ struct OrientationLabelsOverlay: View {
         case "S": return "I"; case "I": return "S"
         default: return ""
         }
+    }
+}
+
+// MARK: - Annotation Overlay
+
+struct AnnotationOverlay: View {
+    @ObservedObject var panel: PanelState
+
+    var body: some View {
+        GeometryReader { geo in
+            // Finalized annotations
+            ForEach(panel.annotations) { annotation in
+                annotationView(for: annotation, viewSize: geo.size)
+            }
+
+            // Ruler preview (dashed line)
+            if let start = panel.rulerPreviewStart, let end = panel.rulerPreviewEnd {
+                let s = pixelToScreen(start, viewSize: geo.size)
+                let e = pixelToScreen(end, viewSize: geo.size)
+                Path { path in
+                    path.move(to: s)
+                    path.addLine(to: e)
+                }
+                .stroke(Color.cyan, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+            }
+
+            // Angle preview (dashed lines)
+            if panel.anglePreviewPoints.count >= 2 {
+                let pts = panel.anglePreviewPoints.map { pixelToScreen($0, viewSize: geo.size) }
+                Path { path in
+                    path.move(to: pts[0])
+                    for i in 1..<pts.count {
+                        path.addLine(to: pts[i])
+                    }
+                }
+                .stroke(Color.green, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func annotationView(for annotation: Annotation, viewSize: CGSize) -> some View {
+        switch annotation.type {
+        case .ruler(let start, let end, let distanceMM):
+            let s = pixelToScreen(start, viewSize: viewSize)
+            let e = pixelToScreen(end, viewSize: viewSize)
+            ZStack {
+                Path { path in
+                    path.move(to: s)
+                    path.addLine(to: e)
+                }
+                .stroke(Color.cyan, lineWidth: 1.5)
+
+                // Distance label at midpoint
+                let mid = CGPoint(x: (s.x + e.x) / 2, y: (s.y + e.y) / 2)
+                let label = panel.pixelSpacing != nil
+                    ? String(format: "%.1f mm", distanceMM)
+                    : String(format: "%.1f px", distanceMM)
+                Text(label)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.cyan)
+                    .padding(2)
+                    .background(Color.black.opacity(0.6))
+                    .cornerRadius(2)
+                    .position(x: mid.x, y: mid.y - 12)
+
+                // Endpoint markers
+                Circle()
+                    .fill(Color.cyan)
+                    .frame(width: 6, height: 6)
+                    .position(s)
+                Circle()
+                    .fill(Color.cyan)
+                    .frame(width: 6, height: 6)
+                    .position(e)
+            }
+
+        case .angle(let vertex, let arm1, let arm2, let degrees):
+            let v = pixelToScreen(vertex, viewSize: viewSize)
+            let a1 = pixelToScreen(arm1, viewSize: viewSize)
+            let a2 = pixelToScreen(arm2, viewSize: viewSize)
+            ZStack {
+                Path { path in
+                    path.move(to: a1)
+                    path.addLine(to: v)
+                    path.addLine(to: a2)
+                }
+                .stroke(Color.green, lineWidth: 1.5)
+
+                // Angle label near vertex
+                Text(String(format: "%.1f°", degrees))
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.green)
+                    .padding(2)
+                    .background(Color.black.opacity(0.6))
+                    .cornerRadius(2)
+                    .position(x: v.x + 16, y: v.y - 12)
+
+                // Endpoint markers
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 6, height: 6)
+                    .position(a1)
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 6, height: 6)
+                    .position(v)
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 6, height: 6)
+                    .position(a2)
+            }
+
+        case .roiStats(let rect, let mean, let maxV, let minV, let stdDev, let count):
+            let topLeft = pixelToScreen(CGPoint(x: rect.minX, y: rect.minY), viewSize: viewSize)
+            let bottomRight = pixelToScreen(CGPoint(x: rect.maxX, y: rect.maxY), viewSize: viewSize)
+            let screenRect = CGRect(
+                x: min(topLeft.x, bottomRight.x),
+                y: min(topLeft.y, bottomRight.y),
+                width: abs(bottomRight.x - topLeft.x),
+                height: abs(bottomRight.y - topLeft.y)
+            )
+            ZStack {
+                Rectangle()
+                    .stroke(Color.orange, lineWidth: 1.5)
+                    .frame(width: screenRect.width, height: screenRect.height)
+                    .position(x: screenRect.midX, y: screenRect.midY)
+
+                // Stats label below the rectangle
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(String(format: "Mean: %.1f", mean))
+                    Text(String(format: "SD: %.1f", stdDev))
+                    Text(String(format: "Min: %.0f  Max: %.0f", minV, maxV))
+                    Text("N: \(count)")
+                }
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.orange)
+                .padding(3)
+                .background(Color.black.opacity(0.7))
+                .cornerRadius(3)
+                .position(x: screenRect.midX, y: screenRect.maxY + 30)
+            }
+        }
+    }
+
+    private func pixelToScreen(_ pixel: CGPoint, viewSize: CGSize) -> CGPoint {
+        let imgW = max(1, panel.displayImageWidth)
+        let imgH = max(1, panel.displayImageHeight)
+        let vw = viewSize.width
+        let vh = viewSize.height
+
+        let fitScale = min(vw / imgW, vh / imgH)
+        let offsetX = (vw - imgW * fitScale) / 2
+        let offsetY = (vh - imgH * fitScale) / 2
+
+        var x = pixel.x * fitScale + offsetX
+        var y = pixel.y * fitScale + offsetY
+
+        let cx = vw / 2
+        let cy = vh / 2
+        x -= cx
+        y -= cy
+
+        if panel.isFlippedH { x = -x }
+        if panel.isFlippedV { y = -y }
+
+        let steps = panel.rotationSteps % 4
+        if steps > 0 {
+            let angle = CGFloat(steps) * .pi / 2
+            let cosA = cos(angle)
+            let sinA = sin(angle)
+            let rx = x * cosA - y * sinA
+            let ry = x * sinA + y * cosA
+            x = rx
+            y = ry
+        }
+
+        x *= panel.scale
+        y *= panel.scale
+
+        x += panel.translation.x
+        y -= panel.translation.y
+
+        x += cx
+        y += cy
+        return CGPoint(x: x, y: y)
+    }
+}
+
+// MARK: - Tool Palette
+
+struct ToolPalette: View {
+    @ObservedObject var model: DICOMModel
+
+    var body: some View {
+        VStack(spacing: 2) {
+            ForEach(ActiveTool.allCases) { tool in
+                Button(action: { model.activeTool = tool }) {
+                    Image(systemName: tool.icon)
+                        .font(.system(size: 14))
+                        .frame(width: 32, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(model.activeTool == tool ? Color.accentColor.opacity(0.3) : Color.clear)
+                        )
+                        .foregroundStyle(model.activeTool == tool ? .white : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help("\(tool.rawValue) (\(tool.shortcutHint))")
+            }
+        }
+        .padding(4)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
     }
 }
 
