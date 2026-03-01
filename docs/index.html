@@ -9,7 +9,7 @@
   <meta property="og:title" content="OpenDicomViewer">
   <meta property="og:description" content="A free, native macOS DICOM viewer — fast, lightweight, and fully customizable.">
   <meta property="og:type" content="website">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🩻</text></svg>">
+  <link rel="icon" type="image/png" href="icon.png">
   <style>
     *, *::before, *::after {
       margin: 0;
@@ -106,17 +106,13 @@
       width: 28px;
       height: 28px;
       border-radius: 7px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-cyan));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 14px;
+      overflow: hidden;
     }
 
-    .nav-icon svg {
-      width: 16px;
-      height: 16px;
-      fill: #fff;
+    .nav-icon img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
 
     .nav-links {
@@ -853,7 +849,7 @@
     <div class="nav-inner">
       <a href="#" class="nav-brand">
         <div class="nav-icon">
-          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9 2a7 7 0 0 0-7 7c0 3.87 3.13 7 7 7h1v4a1 1 0 0 0 1.57.82L16 17h-1a7 7 0 0 0 0-14H9zm0 2h6a5 5 0 0 1 0 10h-1.5l-1.5 1V13H9a5 5 0 0 1 0-10zm1 3a1 1 0 1 0 0 2h4a1 1 0 1 0 0-2h-4zm0 3a1 1 0 1 0 0 2h2a1 1 0 1 0 0-2h-2z"/></svg>
+          <img src="icon.png" alt="OpenDicomViewer icon">
         </div>
         OpenDicomViewer
       </a>
@@ -879,8 +875,11 @@
         Open Source &middot; MIT License
       </div>
     </div>
+    <div class="reveal reveal-delay-1" style="margin-bottom: 24px;">
+      <img src="icon.png" alt="OpenDicomViewer" style="width: 96px; height: 96px; border-radius: 22px; box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.06);">
+    </div>
     <h1 class="reveal reveal-delay-1"><span>OpenDicomViewer</span></h1>
-    <p class="hero-sub reveal reveal-delay-2">A free, native macOS DICOM viewer &mdash; fast, lightweight, and fully customizable.</p>
+    <p class="hero-sub reveal reveal-delay-2">In the era of AI, everyone can build software tailored to their own needs. OpenDicomViewer is a free, native macOS DICOM viewer &mdash; designed to be forked, customized, and made your own.</p>
     <div class="hero-actions reveal reveal-delay-3">
       <a href="https://github.com/jnheo-md/open-dicom-viewer/releases/latest/download/OpenDicomViewer.dmg" class="btn btn-primary">
         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2a1 1 0 0 1 1 1v10.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4a1 1 0 1 1 1.414-1.414L11 13.586V3a1 1 0 0 1 1-1zM5 20a1 1 0 1 1 0 2H5a1 1 0 0 1 0-2h14z"/></svg>
