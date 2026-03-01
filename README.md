@@ -47,7 +47,11 @@
 
 Download the latest `.dmg` from [Releases](../../releases), open it, and drag OpenDicomViewer to your Applications folder.
 
-> **First launch:** Since the app is not notarized, macOS will block it. Right-click the app, select **Open**, then click **Open** in the dialog. You only need to do this once.
+> **First launch:** Since the app is not notarized, macOS will block it. Open Terminal and run:
+> ```
+> xattr -cr /Applications/OpenDicomViewer.app
+> ```
+> Then open the app normally. You only need to do this once.
 
 ### For Developers
 

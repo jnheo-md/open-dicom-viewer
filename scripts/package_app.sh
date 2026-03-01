@@ -66,7 +66,8 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
 </plist>
 EOF
 
-# Add an empty icon file or similar if needed, but default is fine for MVP.
+echo "Ad-hoc code signing..."
+codesign --force --deep -s - "${APP_BUNDLE}"
 
 echo "Successfully created ${APP_BUNDLE}"
 
