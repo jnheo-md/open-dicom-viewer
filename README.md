@@ -29,44 +29,17 @@
 
 ## Features
 
-### Viewing & Navigation
-- **Fast DICOM Parsing** — Custom pure-Swift parser with incremental directory scanning; first image displays instantly while the rest of the study loads in the background
-- **Multi-Panel Layouts** — Single, side-by-side (2x1), stacked (1x2), and quad (2x2) panel arrangements with drag-and-drop series assignment. A miniature panel grid icon next to each series in the sidebar shows exactly which pane displays which series.
-- **Fullscreen Panel** — Double-click any panel to toggle fullscreen mode
-- **Series Thumbnails** — Automatic thumbnail generation for the sidebar series list
-- **Scrollbar with Thumbnail Preview** — Drag or hover the right-side scrollbar to see a thumbnail preview of any slice and navigate rapidly through hundreds of images
-
-### Reconstruction & Rendering
-- **MPR Reconstruction** — One-click sagittal, coronal, and MIP views from any axial series
-- **GPU Volume Rendering** — Metal compute shader for real-time MIP, MinIP, and average intensity projections with adjustable slab thickness for fine control
-
-### Window/Level & Display
-- **Window/Level Controls** — Interactive right-click drag, W/L tool, auto W/L, and ROI-based W/L
-- **Live Histogram with W/L Indicator** — Mini histogram shows pixel value distribution with the current window width and level overlaid, so you can instantly understand the contrast mapping
-- **Display Transforms** — Invert (negative), rotate (90° steps), flip horizontal/vertical
-- **Fit to Window / Reset View** — Quick shortcuts to reset zoom, pan, and W/L
-
-### Measurement & Annotation Tools
-- **Ruler** — Click two points to measure distance (mm when pixel spacing is available, otherwise pixels)
-- **Angle** — Click three points to measure an angle in degrees
-- **ROI Statistics** — Draw a rectangle to compute mean, std dev, min, max, and pixel count
-- **Eraser** — Click near any annotation to remove it
-- **Tool Palette** — Fixed sidebar palette for quick tool selection: Select, Pan, W/L, Zoom, ROI W/L, ROI Stats, Ruler, Angle, Eraser. Ruler and angle tools show a dashed preview line following the cursor between clicks.
-
-### Multi-Panel Coordination
-- **Synchronized Scrolling & Zoom** — Link all panels to scroll to the same spatial position across series using z-location matching, with synchronized zoom and pan
-- **Group Selection** — Hold **Shift** to reveal a selection overlay on each panel; click panels to group them for simultaneous scrolling (orange = linked). Auto-clears if only one panel remains when Shift is released
-- **Cross-Reference Lines** — Optional overlay showing where other panels' slice planes intersect the current view
-
-### Metadata & Overlays
-- **DICOM Tag Inspector** — Browse all DICOM metadata tags for the active image; automatically updates when switching panels
-- **Cursor Readout** — Real-time HU value, pixel coordinates, and patient coordinates under the cursor
-- **Orientation Labels** — Anatomical direction labels (A/P/R/L/S/I) based on DICOM orientation metadata
-- **JPEG 2000 Support** — Handles compressed transfer syntaxes via DCMTK + OpenJPEG
-
-### Help & Documentation
-- **In-App Help** — Comprehensive help viewer accessible via **Help > OpenDicomViewer Help** (Cmd+?)
-- **Menu Bar** — Full View, Layout, and Tools menus with keyboard shortcut hints
+- **Fast DICOM Parsing** — Pure-Swift parser with incremental scanning; first image displays instantly while the rest loads in the background
+- **Multi-Panel Layouts** — Single, side-by-side, stacked, and quad arrangements with drag-and-drop series assignment
+- **MPR & Volume Rendering** — One-click sagittal, coronal, and MIP views with adjustable slab thickness via Metal compute shaders
+- **Window/Level** — Right-click drag, W/L tool, auto W/L, and ROI-based W/L with a live histogram overlay
+- **Measurement Tools** — Ruler, angle, and ROI statistics with real-time preview lines
+- **Synchronized Scrolling & Zoom** — Link panels to scroll to the same anatomical position using z-location matching
+- **Cross-Reference Lines** — Overlay showing where other panels' slice planes intersect the current view
+- **DICOM Tag Inspector** — Browse all metadata tags for the active image
+- **Cursor Readout** — Real-time HU value and coordinates under the cursor
+- **Scrollbar Thumbnails** — Hover the scrollbar to preview any slice
+- **JPEG 2000 Support** — Compressed transfer syntaxes via DCMTK + OpenJPEG
 
 ## Quick Start
 
