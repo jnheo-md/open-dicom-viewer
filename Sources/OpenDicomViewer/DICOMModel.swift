@@ -2502,6 +2502,17 @@ class DICOMModel: ObservableObject {
         }
     }
 
+    /// Synchronized zoom/pan: when one panel zooms or pans, sync others to the same transform.
+    func syncZoomFromPanel(_ source: PanelState) {
+        guard synchronizedScrolling else { return }
+        let targetScale = source.scale
+        let targetTranslation = source.translation
+        for panel in panels where panel.id != source.id {
+            panel.scale = targetScale
+            panel.translation = targetTranslation
+        }
+    }
+
     /// Find the image index in a target series whose z-location is closest to the given z.
     /// Falls back to proportional matching if z-location data is unavailable.
     private func closestImageIndex(inSeries target: DicomSeries, toZ sourceZ: Double?, fallbackSource source: PanelState, sourceSeries: DicomSeries) -> Int {

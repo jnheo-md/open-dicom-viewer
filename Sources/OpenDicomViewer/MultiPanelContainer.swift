@@ -533,6 +533,7 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
             panel.scale = scale
             panel.translation = CGPoint(x: tx, y: ty)
             model.saveViewStateForPanel(panel, scale: scale, translation: CGPoint(x: tx, y: ty))
+            model.syncZoomFromPanel(panel)
         }
 
         override var acceptsFirstResponder: Bool { true }
@@ -1017,6 +1018,22 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 return
             }
 
+            // Update ruler/angle preview line to follow mouse
+            if let model = model, let currentPixel = screenToPixel(event) {
+                switch model.activeTool {
+                case .ruler:
+                    if rulerStartPixel != nil {
+                        panel.rulerPreviewEnd = currentPixel
+                    }
+                case .angle:
+                    if !anglePoints.isEmpty, anglePoints.count < 3 {
+                        panel.anglePreviewPoints = anglePoints + [currentPixel]
+                    }
+                default:
+                    break
+                }
+            }
+
             let loc = convert(event.locationInWindow, from: nil)
 
             // Undo CALayer transform (zoom/pan with anchor at center)
@@ -1218,22 +1235,6 @@ struct PanelAdjustmentToolbar: View {
             .frame(height: 40)
             .help("Auto W/L (A)")
 
-            Button(action: { panel.isROIMode.toggle() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "rectangle.dashed")
-                    Text("ROI")
-                    Text("O")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.white.opacity(0.15))
-                        .cornerRadius(3)
-                }
-            }
-            .frame(height: 40)
-            .help("ROI Auto W/L (O)")
-            .background(panel.isROIMode ? Color.accentColor.opacity(0.3) : Color.clear)
-            .cornerRadius(4)
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)

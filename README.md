@@ -27,10 +27,10 @@ A native macOS DICOM medical image viewer built with SwiftUI. Designed for fast,
 - **Angle** — Click three points to measure an angle in degrees
 - **ROI Statistics** — Draw a rectangle to compute mean, std dev, min, max, and pixel count
 - **Eraser** — Click near any annotation to remove it
-- **Floating Tool Palette** — Left-side palette for quick tool selection: Select, Pan, W/L, Zoom, ROI W/L, ROI Stats, Ruler, Angle, Eraser
+- **Tool Palette** — Fixed sidebar palette for quick tool selection: Select, Pan, W/L, Zoom, ROI W/L, ROI Stats, Ruler, Angle, Eraser. Ruler and angle tools show a dashed preview line following the cursor between clicks.
 
 ### Multi-Panel Coordination
-- **Synchronized Scrolling** — Link all panels to scroll to the same spatial position across series using z-location matching
+- **Synchronized Scrolling & Zoom** — Link all panels to scroll to the same spatial position across series using z-location matching, with synchronized zoom and pan
 - **Group Selection** — Hold **Shift** to reveal a selection overlay on each panel; click panels to group them for simultaneous scrolling (orange = linked). Auto-clears if only one panel remains when Shift is released
 - **Cross-Reference Lines** — Optional overlay showing where other panels' slice planes intersect the current view
 
@@ -98,7 +98,7 @@ A native macOS DICOM medical image viewer built with SwiftUI. Designed for fast,
 |-----|--------|
 | `T` | Toggle DICOM tag inspector |
 | `X` | Toggle cross-reference lines |
-| `L` | Toggle synchronized scrolling |
+| `L` | Toggle synchronized scrolling & zoom |
 | `Shift` (hold) | Show group selection overlay |
 | `Escape` | Clear group selection |
 

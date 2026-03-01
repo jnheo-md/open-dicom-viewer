@@ -54,7 +54,7 @@ struct HelpView: View {
 
                     // Tools
                     helpSection("Tools") {
-                        Text("Select tools from the floating palette on the left side, the **Tools** menu, or with keyboard shortcuts:")
+                        Text("Select tools from the tool palette (fixed column to the left of the panels), the **Tools** menu, or with keyboard shortcuts:")
                         VStack(alignment: .leading, spacing: 6) {
                             toolRow("V", "cursorarrow", "Select", "Default pointer — click to activate panels")
                             toolRow("P", "arrow.up.and.down.and.arrow.left.and.right", "Pan", "Click and drag to pan the image")
@@ -62,8 +62,8 @@ struct HelpView: View {
                             toolRow("Z", "magnifyingglass", "Zoom", "Drag up/down to zoom in/out")
                             toolRow("O", "rectangle.dashed", "ROI W/L", "Draw a rectangle to auto-set window/level from that region")
                             toolRow("S", "chart.bar.xaxis", "ROI Stats", "Draw a rectangle to see mean, min, max, std dev of pixel values")
-                            toolRow("D", "ruler", "Ruler", "Click two points to measure distance in mm")
-                            toolRow("N", "angle", "Angle", "Click three points (vertex, arm1, arm2) to measure an angle")
+                            toolRow("D", "ruler", "Ruler", "Click two points to measure distance in mm. A dashed preview line follows the cursor after the first click.")
+                            toolRow("N", "angle", "Angle", "Click three points (vertex, arm1, arm2) to measure an angle. Dashed preview lines follow the cursor between clicks.")
                             toolRow("E", "eraser", "Eraser", "Click an annotation to delete it")
                         }
                         Text("Hold **Shift** to reveal a selection overlay on each panel. Click panels to toggle them for synchronized scrolling (orange = linked). Press **Escape** to clear.")
@@ -125,7 +125,7 @@ struct HelpView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             shortcutRow("X", "Toggle cross-reference lines")
                             shortcutRow("T", "Toggle DICOM tags inspector")
-                            shortcutRow("L", "Toggle synchronized scrolling")
+                            shortcutRow("L", "Toggle synchronized scrolling and zoom")
                             shortcutRow("Shift (hold)", "Show group selection overlay")
                             shortcutRow("Escape", "Clear group selection")
                         }
@@ -159,7 +159,7 @@ struct HelpView: View {
                             Group {
                                 shortcutCompact("T", "DICOM tags")
                                 shortcutCompact("X", "Cross-reference lines")
-                                shortcutCompact("L", "Synchronized scrolling")
+                                shortcutCompact("L", "Synchronized scrolling & zoom")
                                 shortcutCompact("Shift", "Group selection overlay")
                                 shortcutCompact("Tab", "Cycle panel")
                                 shortcutCompact("Esc", "Clear selection")

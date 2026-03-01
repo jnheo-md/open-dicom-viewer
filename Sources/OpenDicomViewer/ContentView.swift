@@ -32,73 +32,69 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 250, ideal: 300)
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            ZStack(alignment: .topLeading) {
-                // Multi-panel container replaces old single DetailView
-                MultiPanelContainer(model: model, isFocused: $isFocused)
-                    .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-                        _ = handleDrop(providers: providers)
-                        return true
-                    }
-                    .onTapGesture {
-                        isFocused = true
-                    }
+            HStack(spacing: 0) {
+                // Fixed tool palette column
+                ToolPalette(model: model)
+                    .padding(.vertical, 8)
 
-                // Floating controls overlay
-                VStack {
-                    HStack(alignment: .top) {
-                        // Sidebar toggle (when hidden)
-                        if columnVisibility == .detailOnly {
-                            Button(action: { columnVisibility = .all }) {
-                                Image(systemName: "sidebar.right")
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(.secondary)
-                                    .padding(8)
+                // Main viewer area
+                ZStack(alignment: .topLeading) {
+                    // Multi-panel container replaces old single DetailView
+                    MultiPanelContainer(model: model, isFocused: $isFocused)
+                        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                            _ = handleDrop(providers: providers)
+                            return true
+                        }
+                        .onTapGesture {
+                            isFocused = true
+                        }
+
+                    // Floating controls overlay
+                    VStack {
+                        HStack(alignment: .top) {
+                            // Sidebar toggle (when hidden)
+                            if columnVisibility == .detailOnly {
+                                Button(action: { columnVisibility = .all }) {
+                                    Image(systemName: "sidebar.right")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(.secondary)
+                                        .padding(8)
+                                        .background(.ultraThinMaterial)
+                                        .cornerRadius(8)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Show Sidebar")
+                            }
+
+                            Spacer()
+
+                            // Layout toolbar + Tag toggle
+                            HStack(spacing: 8) {
+                                LayoutToolbar(model: model)
+
+                                Button(action: { model.showTags.toggle() }) {
+                                    ZStack(alignment: .bottomTrailing) {
+                                        Image(systemName: "tag")
+                                            .font(.system(size: 16))
+                                            .foregroundStyle(model.showTags ? .white : .secondary)
+                                            .padding(8)
+
+                                        Text("T")
+                                            .font(.system(size: 8, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(.secondary)
+                                            .offset(x: -2, y: -2)
+                                    }
                                     .background(.ultraThinMaterial)
                                     .cornerRadius(8)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Show Sidebar")
-                        }
-
-                        Spacer()
-
-                        // Layout toolbar + Tag toggle
-                        HStack(spacing: 8) {
-                            LayoutToolbar(model: model)
-
-                            Button(action: { model.showTags.toggle() }) {
-                                ZStack(alignment: .bottomTrailing) {
-                                    Image(systemName: "tag")
-                                        .font(.system(size: 16))
-                                        .foregroundStyle(model.showTags ? .white : .secondary)
-                                        .padding(8)
-
-                                    Text("T")
-                                        .font(.system(size: 8, weight: .semibold, design: .rounded))
-                                        .foregroundStyle(.secondary)
-                                        .offset(x: -2, y: -2)
                                 }
-                                .background(.ultraThinMaterial)
-                                .cornerRadius(8)
+                                .buttonStyle(.plain)
+                                .help("Toggle Tags (T)")
                             }
-                            .buttonStyle(.plain)
-                            .help("Toggle Tags (T)")
                         }
-                    }
-                    .padding()
+                        .padding()
 
-                    Spacer()
-                }
-
-                // Left-side tool palette
-                VStack {
-                    Spacer()
-                    HStack {
-                        ToolPalette(model: model)
-                            .padding(.leading, 8)
                         Spacer()
                     }
-                    Spacer()
                 }
             }
         }
@@ -267,12 +263,15 @@ struct ContentView: View {
             return .ignored
         }
         .inspector(isPresented: $model.showTags) {
-            let activeTags = model.activePanel?.tags ?? []
-            if activeTags.isEmpty {
-                ContentUnavailableView("No Tags", systemImage: "tag.slash")
-            } else {
-                TagView(tags: activeTags)
+            Group {
+                let activeTags = model.activePanel?.tags ?? []
+                if activeTags.isEmpty {
+                    ContentUnavailableView("No Tags", systemImage: "tag.slash")
+                } else {
+                    TagView(tags: activeTags)
+                }
             }
+            .id(model.activePanelID)
         }
         .sheet(isPresented: $model.showHelp) {
             HelpView()
