@@ -613,6 +613,103 @@
     pre .comment { color: var(--text-tertiary); }
     pre .cmd { color: var(--accent-hover); }
 
+    /* ---- ABOUT ---- */
+    #about {
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .about-content {
+      display: flex;
+      align-items: flex-start;
+      gap: 48px;
+    }
+
+    .about-photo {
+      flex-shrink: 0;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 2px solid var(--border-medium);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    .about-photo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center 15%;
+    }
+
+    .about-text h3 {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+      margin-bottom: 4px;
+    }
+
+    .about-text .about-title {
+      font-size: 14px;
+      color: var(--accent);
+      font-weight: 500;
+      margin-bottom: 16px;
+    }
+
+    .about-text p {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+      margin-bottom: 12px;
+    }
+
+    .about-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 20px;
+    }
+
+    .about-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+    }
+
+    .about-badge svg {
+      width: 14px;
+      height: 14px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    @media (max-width: 640px) {
+      .about-content {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+      .about-photo {
+        width: 140px;
+        height: 140px;
+      }
+      .about-badges {
+        justify-content: center;
+      }
+    }
+
     /* ---- FOOTER ---- */
     footer {
       padding: 48px 24px;
@@ -837,71 +934,71 @@
         <div class="feature-item reveal">
           <div class="feature-marker"></div>
           <div class="feature-text">
-            <h3>Instant Image Display</h3>
-            <p>Custom pure-Swift DICOM parser with incremental scanning. Images appear before the study finishes loading.</p>
+            <h3>Live Histogram with W/L Indicator</h3>
+            <p>A mini histogram displays the pixel value distribution at a glance. The current window width and level are overlaid directly on the histogram so you can instantly understand the contrast mapping.</p>
           </div>
         </div>
         <div class="feature-item reveal reveal-delay-1">
           <div class="feature-marker"></div>
           <div class="feature-text">
-            <h3>Multi-Panel Layouts</h3>
-            <p>Single, side-by-side, stacked, and quad arrangements with drag-and-drop series assignment.</p>
+            <h3>Scrollbar with Thumbnail Preview</h3>
+            <p>Hover or drag the right-side scrollbar to see a thumbnail preview of any slice. Navigate hundreds of images without losing your place.</p>
           </div>
         </div>
         <div class="feature-item reveal reveal-delay-2">
-          <div class="feature-marker"></div>
-          <div class="feature-text">
-            <h3>MPR Reconstruction</h3>
-            <p>One-click multiplanar reformatting with axial, sagittal, coronal, and MIP views from any series.</p>
-          </div>
-        </div>
-        <div class="feature-item reveal reveal-delay-3">
-          <div class="feature-marker"></div>
-          <div class="feature-text">
-            <h3>GPU Volume Rendering</h3>
-            <p>Metal compute shaders for real-time MIP, MinIP, and average intensity projections.</p>
-          </div>
-        </div>
-        <div class="feature-item reveal">
-          <div class="feature-marker"></div>
-          <div class="feature-text">
-            <h3>Window/Level Controls</h3>
-            <p>Right-click drag, auto W/L, ROI-based W/L, and histogram display for precise contrast adjustment.</p>
-          </div>
-        </div>
-        <div class="feature-item reveal reveal-delay-1">
-          <div class="feature-marker"></div>
-          <div class="feature-text">
-            <h3>Measurement Tools</h3>
-            <p>Ruler, angle, and ROI statistics with real-time dashed preview lines and millimeter-accurate measurements.</p>
-          </div>
-        </div>
-        <div class="feature-item reveal reveal-delay-2">
-          <div class="feature-marker"></div>
-          <div class="feature-text">
-            <h3>Cross-Reference Lines</h3>
-            <p>See where other panels' slice planes intersect the current view for spatial orientation.</p>
-          </div>
-        </div>
-        <div class="feature-item reveal reveal-delay-3">
           <div class="feature-marker"></div>
           <div class="feature-text">
             <h3>DICOM Tag Inspector</h3>
-            <p>Browse all metadata tags for any image. Cursor readout shows HU values and patient coordinates in real-time.</p>
+            <p>Browse every DICOM metadata tag for the active image. Switches automatically when you change panels. Cursor readout shows HU values and patient coordinates in real-time.</p>
+          </div>
+        </div>
+        <div class="feature-item reveal reveal-delay-3">
+          <div class="feature-marker"></div>
+          <div class="feature-text">
+            <h3>Multi-Panel with Series Indicators</h3>
+            <p>Side-by-side, stacked, and quad layouts with drag-and-drop series assignment. A miniature panel grid icon next to each series in the sidebar shows exactly which pane displays which series.</p>
           </div>
         </div>
         <div class="feature-item reveal">
           <div class="feature-marker"></div>
           <div class="feature-text">
-            <h3>Display Transforms</h3>
-            <p>Invert, rotate, and flip images. Fit-to-window and reset-view shortcuts for rapid navigation.</p>
+            <h3>One-Click Sagittal, Coronal &amp; MIP</h3>
+            <p>Instantly reconstruct sagittal and coronal views from any axial series. GPU-accelerated MIP, MinIP, and average projections with adjustable slab thickness for fine control.</p>
           </div>
         </div>
         <div class="feature-item reveal reveal-delay-1">
           <div class="feature-marker"></div>
           <div class="feature-text">
-            <h3>JPEG 2000 Support</h3>
-            <p>Handles compressed DICOM transfer syntaxes via DCMTK and OpenJPEG integration.</p>
+            <h3>Measurement Tools with Live Preview</h3>
+            <p>Ruler, angle, and ROI statistics with dashed preview lines that follow your cursor between clicks. Millimeter-accurate when pixel spacing metadata is available.</p>
+          </div>
+        </div>
+        <div class="feature-item reveal reveal-delay-2">
+          <div class="feature-marker"></div>
+          <div class="feature-text">
+            <h3>Synchronized Scrolling &amp; Zoom</h3>
+            <p>Link all panels to scroll, zoom, and pan in sync. Spatial z-location matching ensures panels showing different series display the same anatomical position.</p>
+          </div>
+        </div>
+        <div class="feature-item reveal reveal-delay-3">
+          <div class="feature-marker"></div>
+          <div class="feature-text">
+            <h3>Cross-Reference Lines</h3>
+            <p>See where other panels' slice planes intersect the current view for spatial orientation across series.</p>
+          </div>
+        </div>
+        <div class="feature-item reveal">
+          <div class="feature-marker"></div>
+          <div class="feature-text">
+            <h3>Instant Image Display</h3>
+            <p>Custom pure-Swift DICOM parser with incremental scanning. The first image appears before the rest of the study finishes loading in the background.</p>
+          </div>
+        </div>
+        <div class="feature-item reveal reveal-delay-1">
+          <div class="feature-marker"></div>
+          <div class="feature-text">
+            <h3>JPEG 2000 &amp; Compressed DICOM</h3>
+            <p>Handles all common compressed transfer syntaxes via DCMTK and OpenJPEG integration, including JPEG, JPEG-LS, and JPEG 2000.</p>
           </div>
         </div>
       </div>
@@ -964,6 +1061,46 @@
 
 <span class="comment"># Install (optional)</span>
 <span class="cmd">cp -r</span> OpenDicomViewer.app /Applications/</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ABOUT -->
+  <section id="about">
+    <div class="section-inner">
+      <div class="section-header reveal">
+        <p class="section-label">About the Author</p>
+        <h2 class="section-title">Built by a physician<br>who codes.</h2>
+      </div>
+      <div class="about-content reveal">
+        <div class="about-photo">
+          <img src="author.png" alt="JoonNyung Heo, MD, PhD">
+        </div>
+        <div class="about-text">
+          <h3>JoonNyung Heo, MD, PhD</h3>
+          <p class="about-title">Neurologist &amp; Neurointerventionist &middot; Yonsei University College of Medicine</p>
+          <p>I am a stroke neurologist and neurointerventionist at Severance Hospital, and an Assistant Professor of Neurology at Yonsei University College of Medicine, where I am a member of the Yonsei Stroke Team. My clinical work focuses on acute ischemic stroke and endovascular thrombectomy.</p>
+          <p>I have been passionate about software engineering for over 25 years. My research applies AI and machine learning to stroke medicine &mdash; from predicting outcomes in acute stroke to analyzing thrombi with deep learning. I was named one of MIT Technology Review's <strong>Innovators Under 35</strong> (Korea, 2021) for this work at the intersection of medicine and technology.</p>
+          <p>I believe that in the era of AI, every physician and researcher should be able to build and customize their own tools. OpenDicomViewer was born from this conviction &mdash; a DICOM viewer designed not just for use, but for adaptation. Fork it, modify it with an AI assistant, and make it yours.</p>
+          <div class="about-badges">
+            <span class="about-badge">
+              <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+              Yonsei Stroke Team
+            </span>
+            <span class="about-badge">
+              <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              MIT Innovators Under 35
+            </span>
+            <span class="about-badge">
+              <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              Stroke &amp; Neurointervention
+            </span>
+            <span class="about-badge">
+              <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              25+ Years in Software
+            </span>
+          </div>
         </div>
       </div>
     </div>
