@@ -8,6 +8,7 @@
 //
 // This is the fallback rendering path; GPU-accelerated rendering is handled
 // by MetalVolumeRenderer for MIP projections.
+// Licensed under the MIT License. See LICENSE for details.
 
 import Foundation
 import AppKit

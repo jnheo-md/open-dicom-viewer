@@ -5,6 +5,7 @@
 // hides the titlebar, removes traffic light buttons, and enables
 // window dragging by background. Used to achieve a clean, immersive
 // viewer interface.
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 import AppKit

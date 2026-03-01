@@ -5,6 +5,7 @@
 // decoding functionality to Swift via two classes:
 //   - DCMTKHelper: Stateless class methods for one-shot decoding
 //   - DCMTKImageObject: Retains decoded image state for efficient re-rendering
+// Licensed under the MIT License. See LICENSE for details.
 
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>

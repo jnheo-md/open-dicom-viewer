@@ -15,6 +15,7 @@
 //
 // PanelState is a reference type (class) so multiple views can observe the
 // same panel instance. Shared resources (caches, series data) live in DICOMModel.
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 import DCMTKWrapper

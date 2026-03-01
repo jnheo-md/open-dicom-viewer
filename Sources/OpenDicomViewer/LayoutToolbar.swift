@@ -7,6 +7,7 @@
 //   - Synchronized scrolling toggle (link icon, "L" key)
 //   - Cross-reference line toggle (cross icon, "X" key)
 // Each button shows its keyboard shortcut as a small badge.
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 

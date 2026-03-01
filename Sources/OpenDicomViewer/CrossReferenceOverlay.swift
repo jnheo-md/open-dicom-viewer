@@ -12,6 +12,7 @@
 //
 // Each panel gets a distinct color (blue, green, yellow, red) for its
 // cross-reference line, drawn as a dashed stroke.
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 

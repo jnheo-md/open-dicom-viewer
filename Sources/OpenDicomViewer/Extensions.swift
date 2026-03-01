@@ -2,6 +2,7 @@
 // OpenDicomViewer
 //
 // Utility extensions used throughout the app.
+// Licensed under the MIT License. See LICENSE for details.
 
 import Foundation
 

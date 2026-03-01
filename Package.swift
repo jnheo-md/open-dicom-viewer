@@ -1,4 +1,7 @@
 // swift-tools-version: 5.9
+// Package.swift — OpenDicomViewer
+// Licensed under the MIT License. See LICENSE for details.
+
 import PackageDescription
 
 let package = Package(

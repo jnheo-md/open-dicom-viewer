@@ -5,6 +5,7 @@
 // is available. Provides controls for switching between display modes
 // (2D Slice, Sagittal MPR, Coronal MPR, MIP) and adjusting MIP-specific
 // parameters like slab thickness, projection type, and rotation.
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 

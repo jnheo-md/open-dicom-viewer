@@ -1,4 +1,7 @@
 #!/bin/bash
+# setup_native_deps.sh — OpenDicomViewer
+# Downloads and builds DCMTK and OpenJPEG static libraries from source.
+# Licensed under the MIT License. See LICENSE for details.
 set -e
 
 # Directory Setup

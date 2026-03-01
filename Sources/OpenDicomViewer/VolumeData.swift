@@ -12,6 +12,7 @@
 //
 // Memory is manually allocated via UnsafeMutableBufferPointer and freed
 // in deinit to avoid Swift Array overhead for large volumes.
+// Licensed under the MIT License. See LICENSE for details.
 
 import Foundation
 import simd

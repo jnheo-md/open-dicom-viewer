@@ -1,13 +1,22 @@
 # OpenDicomViewer
 
-A native macOS DICOM medical image viewer built with SwiftUI. Designed for fast, lightweight viewing of DICOM studies with multi-panel layouts, MPR reconstruction, GPU-accelerated volume rendering, and clinical measurement tools.
+**A free, native macOS DICOM viewer — fast, lightweight, and built for customization.**
 
 <!-- ![Screenshot](screenshot.png) -->
+
+## Why OpenDicomViewer?
+
+- **Free and open source** — MIT licensed, no restrictions on use or modification
+- **Native macOS** — Built with SwiftUI and Metal, no Electron or web overhead
+- **Fast** — Instant first-image display with background loading; images appear before the study finishes scanning
+- **Multi-panel layouts** — Side-by-side, stacked, and quad views with synchronized scrolling and zoom
+- **Clinical measurement tools** — Ruler, angle, and ROI statistics with real-time dashed preview lines
+- **Designed for customization** — Clean, readable architecture that's easy to fork and adapt, including with AI coding assistants
 
 ## Features
 
 ### Viewing & Navigation
-- **Fast DICOM Parsing** — Custom pure-Swift DICOM parser with incremental directory scanning; first image displays instantly while the rest of the study loads in the background
+- **Fast DICOM Parsing** — Custom pure-Swift parser with incremental directory scanning; first image displays instantly while the rest of the study loads in the background
 - **Multi-Panel Layouts** — Single, side-by-side (2x1), stacked (1x2), and quad (2x2) panel arrangements with drag-and-drop series assignment
 - **Fullscreen Panel** — Double-click any panel to toggle fullscreen mode
 - **Series Thumbnails** — Automatic thumbnail generation for the sidebar series list
@@ -43,6 +52,36 @@ A native macOS DICOM medical image viewer built with SwiftUI. Designed for fast,
 ### Help & Documentation
 - **In-App Help** — Comprehensive help viewer accessible via **Help > OpenDicomViewer Help** (Cmd+?)
 - **Menu Bar** — Full View, Layout, and Tools menus with keyboard shortcut hints
+
+## Quick Start
+
+### For Users
+
+Download the latest `.dmg` from [Releases](../../releases), open it, and drag OpenDicomViewer to your Applications folder.
+
+> **First launch:** Since the app is not notarized, macOS will block it. Right-click the app, select **Open**, then click **Open** in the dialog. You only need to do this once.
+
+### For Developers
+
+**Prerequisites:** macOS 14.0+ (Sonoma), Xcode 15+ (or Swift 5.9+ toolchain), Apple Silicon Mac (arm64).
+
+```bash
+# Clone and build
+git clone https://github.com/jnheo-md/OpenDicomViewer.git
+cd OpenDicomViewer
+
+# Build release and package as .app bundle
+./scripts/package_app.sh
+
+# Install (optional)
+cp -r OpenDicomViewer.app /Applications/
+```
+
+Pre-built static libraries for DCMTK and OpenJPEG are included in `libs/`. To rebuild them from source (e.g., for a different architecture):
+
+```bash
+./scripts/setup_native_deps.sh
+```
 
 ## Keyboard Shortcuts
 
@@ -150,65 +189,38 @@ Sources/
 - **Spatial Synchronization**: Linked scrolling uses physical z-location matching rather than proportional index matching, so panels showing different series display the same anatomical position.
 - **NSView for Interaction**: Mouse gesture handling uses `NSViewRepresentable` wrapping a custom `NSView` subclass for reliable AppKit-level event handling (W/L drag, zoom, pan, annotations).
 
-## Building
+## Customization Guide
 
-### Prerequisites
+OpenDicomViewer is designed to be straightforward to customize — whether you're adding features manually or working with an AI coding assistant. Here's where to look for common changes:
 
-- macOS 14.0+ (Sonoma)
-- Xcode 15+ (or Swift 5.9+ toolchain)
-- Apple Silicon Mac (arm64) — Intel support requires rebuilding the native libraries
+| What you want to do | Where to look |
+|---|---|
+| **Add a new tool** | Define it in the `ActiveTool` enum in `PanelState.swift`, add mouse handling in `MultiPanelContainer.swift`, and add a button to the tool palette (also in `MultiPanelContainer.swift`) |
+| **Add a keyboard shortcut** | Add an `.onKeyPress` handler in `ContentView.swift` |
+| **Modify overlays** | Edit `AnnotationOverlay` or `InfoOverlay` in `MultiPanelContainer.swift` |
+| **Change panel behavior** | Per-panel state lives in `PanelState.swift`; cross-panel coordination is in `DICOMModel.swift` |
+| **Add a menu bar command** | Add commands in `App.swift` |
+| **Modify cross-reference lines** | Edit `CrossReferenceOverlay.swift` |
 
-### 1. Build Native Dependencies
+The codebase uses clear naming conventions and minimal abstraction layers, making it well-suited for AI-assisted development. Fork the project, describe what you want to change, and point your AI assistant at the relevant files above.
 
-The pre-built static libraries for DCMTK and OpenJPEG are included in `libs/`. If you need to rebuild them (e.g., for a different architecture):
+## Contributing
 
-```bash
-./scripts/setup_native_deps.sh
-```
+Contributions are welcome! Whether it's a bug fix, new feature, or documentation improvement — all PRs are appreciated.
 
-This downloads and compiles DCMTK 3.6.8 and OpenJPEG 2.5.0 as static libraries.
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes (`git commit -am 'Add my feature'`)
+4. Push to the branch (`git push origin feature/my-feature`)
+5. Open a Pull Request
 
-### 2. Build the App
+If you find a bug or have a feature request, please [open an issue](../../issues).
 
-```bash
-swift build -c release
-```
+## License
 
-### 3. Package as .app Bundle
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
 
-```bash
-./scripts/package_app.sh
-```
-
-This creates `OpenDicomViewer.app` in the project root. To install:
-
-```bash
-cp -r OpenDicomViewer.app /Applications/
-```
-
-### First Run on Another Mac
-
-Since the app is not notarized, macOS will block it. Right-click the app and select **Open**, then click **Open** in the dialog. You only need to do this once.
-
-## Project Structure
-
-```
-OpenDicomViewer/
-├── Sources/                  # All Swift + ObjC++ source code
-├── libs/                     # Pre-built static libraries
-│   ├── dcmtk/               #   DCMTK 3.6.8 (headers, libs, dicom.dic)
-│   └── openjpeg/             #   OpenJPEG 2.5.0 (headers, libopenjp2.a)
-├── scripts/
-│   ├── setup_native_deps.sh  # Download & build DCMTK + OpenJPEG
-│   ├── build_native.sh       # Build + sign + package (with code signing)
-│   ├── package_app.sh        # Build + package (without signing)
-│   └── OpenDicomViewer.entitlements
-├── HELP.md                   # Full feature documentation
-├── Package.swift             # Swift Package Manager manifest
-├── AppIcon.icns              # Application icon
-├── LICENSE                   # MIT License
-└── README.md                 # This file
-```
+DCMTK is licensed under the BSD license. OpenJPEG is licensed under BSD-2-Clause. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for full license texts.
 
 ## Dependencies
 
@@ -218,17 +230,3 @@ OpenDicomViewer/
 | [OpenJPEG](https://www.openjpeg.org/) | 2.5.0 | JPEG 2000 decompression | BSD-2-Clause |
 
 Both are included as pre-built static libraries (`libs/`) and linked at compile time via Swift Package Manager.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes (`git commit -am 'Add my feature'`)
-4. Push to the branch (`git push origin feature/my-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
-
-DCMTK is licensed under the BSD license. OpenJPEG is licensed under BSD-2-Clause. See their respective documentation in `libs/` for details.

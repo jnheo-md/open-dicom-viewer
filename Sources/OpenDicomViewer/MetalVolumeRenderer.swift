@@ -13,6 +13,7 @@
 //
 // Also provides VolumeRenderView, a SwiftUI MTKView wrapper (currently a
 // placeholder for future interactive Metal rendering).
+// Licensed under the MIT License. See LICENSE for details.
 
 import Foundation
 import Metal

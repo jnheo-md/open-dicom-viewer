@@ -14,6 +14,7 @@
 //   SeriesRow         — Single series row: thumbnail, description, panel grid icon
 //   PanelPositionIndicator — Miniature grid showing which panels display a series
 //   DetailView        — Legacy single-panel detail (used as fallback)
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 import UniformTypeIdentifiers

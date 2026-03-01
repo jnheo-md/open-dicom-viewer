@@ -20,6 +20,7 @@
 //   - Image loading uses an OperationQueue (serial, for cancellation)
 //   - All @Published state updates dispatch to MainActor
 //   - Volume building runs on a dedicated background queue
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 import Combine
@@ -379,10 +380,7 @@ class DICOMModel: ObservableObject {
                 let data = try Data(contentsOf: url)
                 let parser = SimpleDicomParser(data: data)
                 let (elements, pixelData, syntax) = try parser.parse()
-                guard let pd = pixelData else { 
-                    print("Thumb: No pixel data for \(url.lastPathComponent)")
-                    return 
-                }
+                guard let pd = pixelData else { return }
 
                 // Extract tags needed for rendering
                 func getInt(_ g: UInt16, _ e: UInt16) -> Int? { 
@@ -409,9 +407,7 @@ class DICOMModel: ObservableObject {
                 let startsWithItemTag = pd.count > 4 && pd[0] == 0xFE && pd[1] == 0xFF && pd[2] == 0x00 && pd[3] == 0xE0
                 
                 let isCompressed = isCompressedUID || isSizeCompressed || startsWithItemTag
-                
-                print("Thumb: Processing \(url.lastPathComponent) Syn:\(syntax ?? "nil") Enc:\(startsWithItemTag) Comp:\(isCompressed)")
-                
+
                 if isCompressed {
                     // Attempt native decode (JPEG/JPEG-LS/JPEG2000 embedded in DICOM)
                     // Encapsulated data usually starts with an Item Tag, then invalid bytes, then the image.
@@ -439,12 +435,10 @@ class DICOMModel: ObservableObject {
                          let leveledImg = self.autoLevelImage(rawImg) ?? rawImg
                          
                          DispatchQueue.main.async {
-                             print("Thumb: Decoded & Leveled Compressed \(series.id)")
                              self.seriesThumbnails[series.id] = leveledImg
                          }
                          return
                     } else {
-                        print("Thumb: Native decode failed. Fallback to DCMTK for \(url.lastPathComponent)")
                         if let img = DCMTKHelper.convertDICOM(toNSImage: url.path) {
                              let leveledImg = self.autoLevelImage(img) ?? img
                              DispatchQueue.main.async {
@@ -512,12 +506,10 @@ class DICOMModel: ObservableObject {
                     DispatchQueue.main.async {
                         self.seriesThumbnails[series.id] = leveledImg
                     }
-                } else {
-                    print("Thumb: CTX Fail w:\(w) h:\(h)")
                 }
-            } catch { 
-                print("Thumb error: \(error)")
-            } 
+            } catch {
+                // Thumbnail generation failed — skip silently
+            }
         }
     }
     
@@ -593,7 +585,6 @@ class DICOMModel: ObservableObject {
     }
 
     func load(url: URL) {
-        print("Loading URL: \(url.path)")
         let secured = url.startAccessingSecurityScopedResource()
         defer { if secured { url.stopAccessingSecurityScopedResource() } }
         
@@ -1009,12 +1000,6 @@ class DICOMModel: ObservableObject {
     }
 
     private func extractEncapsulatedData(_ data: Data) -> [Data]? {
-        // Debug: Print Header
-        if data.count >= 16 {
-             let header = data.prefix(16).map { String(format: "%02X", $0) }.joined(separator: " ")
-             print("Encapsulated Data Header: \(header)")
-        }
-
         // Parse Sequence of Items from raw data block
         // Format: (Tag: FF FE E0 00) (Len: 4 bytes) (Value) ...
         var offset = 0
@@ -1221,17 +1206,12 @@ class DICOMModel: ObservableObject {
              // print("DEBUG: Adjusting W/L - WW: \(self.windowWidth), WC: \(self.windowCenter)")
              if let newImg = dcmObj.renderImage(withWidth: 0, height: 0, ww: self.windowWidth, wc: self.windowCenter) {
                  self.image = newImg
-             } else {
-                 print("DEBUG: renderImage returned nil")
              }
         } else if let data = self.rawPixelData {
-            print("DEBUG: dcmtkImage is nil, falling back to rawPixelData")
             // Fallback to manual rendering (should not happen if dcmtkImage is set)
             if let newImg = renderImage(width: self.imageWidth, height: self.imageHeight, pixelData: data, ww: self.windowWidth, wc: self.windowCenter) {
                 self.image = newImg
             }
-        } else {
-            print("DEBUG: No dcmtkImage and no rawPixelData")
         }
         
         // Update Cache Params for current image
@@ -1705,7 +1685,6 @@ class DICOMModel: ObservableObject {
                                      self.currentSeriesIndex = sIdx
                                      self.currentImageIndex = imgIdx
                                      found = true
-                                     print("Found target image at Series \(sIdx), Index \(imgIdx)")
                                      break
                                  }
                              }
@@ -1723,7 +1702,6 @@ class DICOMModel: ObservableObject {
                                      self.loadSingleFile(first.url)
                                  }
                              }
-                             print("Target not found or selection invalid. Defaulting to Series 0, Image 0.")
                          }
                     } else if self.allSeries.isEmpty && isFinal {
                         self.errorMessage = "No DICOM series found."

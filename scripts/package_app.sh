@@ -1,4 +1,7 @@
 #!/bin/bash
+# package_app.sh — OpenDicomViewer
+# Builds a release binary and creates the .app bundle + DMG for distribution.
+# Licensed under the MIT License. See LICENSE for details.
 set -e
 
 APP_NAME="OpenDicomViewer"
@@ -66,4 +69,30 @@ EOF
 # Add an empty icon file or similar if needed, but default is fine for MVP.
 
 echo "Successfully created ${APP_BUNDLE}"
-echo "To install: mv ${APP_BUNDLE} /Applications/"
+
+# --- Create DMG for distribution ---
+DMG_NAME="${APP_NAME}.dmg"
+DMG_TEMP="dmg_tmp"
+
+echo "Creating DMG at ${DMG_NAME}..."
+rm -rf "${DMG_TEMP}" "${DMG_NAME}"
+mkdir -p "${DMG_TEMP}"
+
+# Copy app bundle into staging dir
+cp -R "${APP_BUNDLE}" "${DMG_TEMP}/"
+
+# Add Applications symlink for drag-to-install
+ln -s /Applications "${DMG_TEMP}/Applications"
+
+# Create DMG
+hdiutil create -volname "${APP_NAME}" \
+    -srcfolder "${DMG_TEMP}" \
+    -ov -format UDZO \
+    "${DMG_NAME}" \
+    -quiet
+
+rm -rf "${DMG_TEMP}"
+
+echo "Successfully created ${DMG_NAME}"
+echo ""
+echo "To install: open ${DMG_NAME} and drag ${APP_NAME} to Applications"

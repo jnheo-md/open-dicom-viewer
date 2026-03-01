@@ -13,6 +13,7 @@
 //   SimpleDicomParser  — Streaming parser that reads tags sequentially from Data,
 //                        supports both explicit and implicit VR, little/big endian,
 //                        and can stop at PixelData for fast header-only parsing
+// Licensed under the MIT License. See LICENSE for details.
 
 import Foundation
 
@@ -91,7 +92,7 @@ class SimpleDicomParser {
     var offset: Int = 0
     var isLittleEndian: Bool = true
     var isExplicitVR: Bool = true 
-    var debugMode: Bool = true // Enable by default for diagnosis
+    var debugMode: Bool = false
     
     init(data: Data) {
         self.data = data
@@ -157,7 +158,7 @@ class SimpleDicomParser {
                  }
             } catch DicomError.endOfFile {
                 // If we hit EOF during an element parse, just stop and return what we have (truncated file support)
-                print("Parser hit EOF. Returning captured elements.")
+                // EOF reached — return captured elements
                 break
             } catch {
                 throw error

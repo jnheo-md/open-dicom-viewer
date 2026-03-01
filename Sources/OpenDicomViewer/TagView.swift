@@ -5,6 +5,7 @@
 // for the currently selected image in a scrollable list. Each row shows
 // the tag ID (group,element), VR, and value. Large binary values are
 // summarized as byte counts.
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 

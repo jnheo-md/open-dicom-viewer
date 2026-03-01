@@ -17,6 +17,7 @@
 // Supports standard DICOM transfer syntaxes including JPEG, JPEG-LS,
 // and JPEG 2000 (via OpenJPEG). Handles both 8-bit and 16-bit pixel data,
 // signed/unsigned, and Monochrome1/Monochrome2 photometric interpretations.
+// Licensed under the MIT License. See LICENSE for details.
 
 #import "DCMTKHelper.h"
 

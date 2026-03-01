@@ -3,6 +3,7 @@
 build/
 dist/
 *.app
+*.dmg
 
 # Dependencies (rebuilt via scripts/setup_native_deps.sh)
 temp_build/
@@ -21,6 +22,9 @@ debug_main.swift
 .DS_Store
 *.swp
 *~
+
+# Swift Package Manager
+.swiftpm/
 
 # Xcode
 *.xcodeproj/

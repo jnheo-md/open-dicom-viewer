@@ -1,4 +1,7 @@
 #!/bin/bash
+# build_native.sh — OpenDicomViewer
+# Builds a release binary, creates the .app bundle, and optionally code-signs it.
+# Licensed under the MIT License. See LICENSE for details.
 set -e
 
 # Configuration

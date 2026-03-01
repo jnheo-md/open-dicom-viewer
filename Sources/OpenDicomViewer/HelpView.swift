@@ -2,6 +2,7 @@
 // OpenDicomViewer
 //
 // In-app help viewer showing usage guide, tools reference, and keyboard shortcuts.
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 

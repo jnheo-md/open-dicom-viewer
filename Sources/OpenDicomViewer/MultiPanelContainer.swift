@@ -18,6 +18,7 @@
 //                              gesture recognizers for W/L, zoom, pan, scroll
 //   PanelAdjustmentToolbar   — Bottom bar with histogram + Auto/ROI buttons
 //   PanelHistogramView       — Miniature histogram with W/L window indicator
+// Licensed under the MIT License. See LICENSE for details.
 
 import SwiftUI
 import QuartzCore
