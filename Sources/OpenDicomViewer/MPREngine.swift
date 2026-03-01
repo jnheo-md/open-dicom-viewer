@@ -54,14 +54,21 @@ struct VolumeBuilder {
         let images = series.images
         guard !images.isEmpty else { throw VolumeBuilderError.noImages }
 
-        // Validate spatial metadata on first image
-        guard let firstOrient = images.first?.imageOrientation, firstOrient.count == 6,
-              let firstSpacing = images.first?.pixelSpacing,
-              images.first?.imagePosition != nil
+        // Find first image with complete spatial metadata
+        var firstOrient: [Double]?
+        var firstSpacing: SIMD2<Double>?
+        for img in images {
+            if firstOrient == nil, let o = img.imageOrientation, o.count == 6 { firstOrient = o }
+            if firstSpacing == nil, let s = img.pixelSpacing { firstSpacing = s }
+            if firstOrient != nil && firstSpacing != nil { break }
+        }
+
+        guard let orient = firstOrient, orient.count == 6,
+              let spacing = firstSpacing
         else { throw VolumeBuilderError.missingSpatialMetadata }
 
-        let rowDir = simd_normalize(SIMD3<Double>(firstOrient[0], firstOrient[1], firstOrient[2]))
-        let colDir = simd_normalize(SIMD3<Double>(firstOrient[3], firstOrient[4], firstOrient[5]))
+        let rowDir = simd_normalize(SIMD3<Double>(orient[0], orient[1], orient[2]))
+        let colDir = simd_normalize(SIMD3<Double>(orient[3], orient[4], orient[5]))
         let sliceNormal = simd_normalize(simd_cross(rowDir, colDir))
 
         // Sort images by projection along slice normal
@@ -73,28 +80,28 @@ struct VolumeBuilder {
 
         guard sorted.count >= 2 else { throw VolumeBuilderError.missingSpatialMetadata }
 
-        // Determine consistent dimensions by loading first image's raw data
-        let (firstW, firstH, firstBits, firstSigned) = try loadImageDimensions(sorted[0].0, rawDataCache: rawDataCache, dcmtkCache: dcmtkCache)
+        // Determine consistent dimensions — try multiple images if the first fails
+        var firstW = 0, firstH = 0
+        var dimsFound = false
+        for (img, _) in sorted {
+            if let (w, h, _, _) = try? loadImageDimensions(img, rawDataCache: rawDataCache, dcmtkCache: dcmtkCache) {
+                firstW = w; firstH = h; dimsFound = true; break
+            }
+        }
+        guard dimsFound, firstW > 0, firstH > 0 else {
+            throw VolumeBuilderError.missingPixelData(url: sorted[0].0.url)
+        }
 
-        // Compute slice spacing from positions
+        // Compute slice spacing using median (robust to outliers)
         var spacings: [Double] = []
         for i in 1..<sorted.count {
             spacings.append(sorted[i].1 - sorted[i - 1].1)
         }
-        let avgSpacing = spacings.reduce(0, +) / Double(spacings.count)
-
-        // Validate uniform spacing (10% tolerance)
-        if avgSpacing > 0 {
-            for s in spacings {
-                let deviation = abs(s - avgSpacing) / avgSpacing * 100
-                if deviation > 10 {
-                    throw VolumeBuilderError.nonUniformSpacing(maxDeviation: deviation)
-                }
-            }
-        }
+        let sortedSpacings = spacings.sorted()
+        let medianSpacing = sortedSpacings[sortedSpacings.count / 2]
 
         let depth = sorted.count
-        let sliceSpacing = abs(avgSpacing) > 1e-6 ? abs(avgSpacing) : (series.images.first?.sliceThickness ?? 1.0)
+        let sliceSpacing = abs(medianSpacing) > 1e-6 ? abs(medianSpacing) : (series.images.first?.sliceThickness ?? 1.0)
 
         // Memory check
         let requiredBytes = firstW * firstH * depth * MemoryLayout<Int16>.stride
@@ -141,8 +148,8 @@ struct VolumeBuilder {
             width: firstW,
             height: firstH,
             depth: depth,
-            spacingX: firstSpacing.x,
-            spacingY: firstSpacing.y,
+            spacingX: spacing.x,
+            spacingY: spacing.y,
             spacingZ: sliceSpacing,
             origin: origin,
             rowDirection: rowDir,
@@ -168,6 +175,13 @@ struct VolumeBuilder {
                 return (w, h, d, signed.boolValue)
             }
         }
+        // JPEG 2000 fallback via OpenJPEG
+        var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
+        var signed: ObjCBool = false
+        if let raw = DCMTKHelper.decodeJPEG2000DICOM(img.url.path, width: &w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) {
+            rawDataCache.setObject(raw as NSData, forKey: img.url as NSURL)
+            return (w, h, d, signed.boolValue)
+        }
         throw VolumeBuilderError.missingPixelData(url: img.url)
     }
 
@@ -177,17 +191,35 @@ struct VolumeBuilder {
         rawDataCache: NSCache<NSURL, NSData>,
         dcmtkCache: NSCache<NSURL, DCMTKImageObject>
     ) -> (data: Data, bits: Int, isSigned: Bool)? {
-        // Load via DCMTK (always query for per-slice bit depth)
-        let dcmObj = dcmtkCache.object(forKey: img.url as NSURL) ?? DCMTKImageObject(path: img.url.path)
-        guard let dcmObj = dcmObj else { return nil }
+        // Try cached raw data first
+        if let cached = rawDataCache.object(forKey: img.url as NSURL) {
+            // Need dimensions — try DCMTK or JPEG 2000
+            if let dcmObj = dcmtkCache.object(forKey: img.url as NSURL) ?? DCMTKImageObject(path: img.url.path) {
+                var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
+                var signed: ObjCBool = false
+                if dcmObj.getRawDataWidth(&w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) != nil {
+                    return (cached as Data, d, signed.boolValue)
+                }
+            }
+        }
+        // Try DCMTK
+        if let dcmObj = dcmtkCache.object(forKey: img.url as NSURL) ?? DCMTKImageObject(path: img.url.path) {
+            var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
+            var signed: ObjCBool = false
+            if let raw = dcmObj.getRawDataWidth(&w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) {
+                rawDataCache.setObject(raw as NSData, forKey: img.url as NSURL)
+                dcmtkCache.setObject(dcmObj, forKey: img.url as NSURL)
+                return (raw as Data, d, signed.boolValue)
+            }
+        }
+        // JPEG 2000 fallback via OpenJPEG
         var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
         var signed: ObjCBool = false
-        guard let raw = dcmObj.getRawDataWidth(&w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) else {
-            return nil
+        if let raw = DCMTKHelper.decodeJPEG2000DICOM(img.url.path, width: &w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) {
+            rawDataCache.setObject(raw as NSData, forKey: img.url as NSURL)
+            return (raw as Data, d, signed.boolValue)
         }
-        rawDataCache.setObject(raw as NSData, forKey: img.url as NSURL)
-        dcmtkCache.setObject(dcmObj, forKey: img.url as NSURL)
-        return (raw as Data, d, signed.boolValue)
+        return nil
     }
 
     private static func fillSlice(

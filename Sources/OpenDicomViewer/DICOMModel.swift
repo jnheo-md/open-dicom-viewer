@@ -1848,7 +1848,7 @@ class DICOMModel: ObservableObject {
             var imagePosition: SIMD3<Double>? = nil
 
             func parseIPP(_ str: String) -> (SIMD3<Double>?, Double?) {
-                let parts = str.components(separatedBy: "\\")
+                let parts = str.components(separatedBy: "\\").map { $0.trimmingCharacters(in: .whitespaces) }
                 if parts.count == 3,
                    let x = Double(parts[0]), let y = Double(parts[1]), let z = Double(parts[2]) {
                     return (SIMD3<Double>(x, y, z), z)
@@ -1873,7 +1873,7 @@ class DICOMModel: ObservableObject {
             // ImageOrientationPatient (0020,0037) — 6 direction cosines
             var imageOrientation: [Double]? = nil
             if let orientStr = getStr(g: 0x0020, e: 0x0037) ?? parser.findTagRaw(DicomTag(group: 0x0020, element: 0x0037)) {
-                let parts = orientStr.components(separatedBy: "\\").compactMap { Double($0) }
+                let parts = orientStr.components(separatedBy: "\\").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
                 if parts.count == 6 {
                     imageOrientation = parts
                 }
@@ -1882,9 +1882,18 @@ class DICOMModel: ObservableObject {
             // PixelSpacing (0028,0030) — row\column in mm
             var pixelSpacing: SIMD2<Double>? = nil
             if let spacingStr = getStr(g: 0x0028, e: 0x0030) ?? parser.findTagRaw(DicomTag(group: 0x0028, element: 0x0030)) {
-                let parts = spacingStr.components(separatedBy: "\\").compactMap { Double($0) }
+                let parts = spacingStr.components(separatedBy: "\\").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
                 if parts.count == 2 {
                     pixelSpacing = SIMD2<Double>(parts[0], parts[1])
+                }
+            }
+            // Fallback: ImagerPixelSpacing (0018,1164)
+            if pixelSpacing == nil {
+                if let spacingStr = getStr(g: 0x0018, e: 0x1164) ?? parser.findTagRaw(DicomTag(group: 0x0018, element: 0x1164)) {
+                    let parts = spacingStr.components(separatedBy: "\\").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+                    if parts.count == 2 {
+                        pixelSpacing = SIMD2<Double>(parts[0], parts[1])
+                    }
                 }
             }
 
@@ -2032,6 +2041,7 @@ class DICOMModel: ObservableObject {
         guard seriesIndex >= 0, seriesIndex < allSeries.count else { return }
         panel.seriesIndex = seriesIndex
         panel.imageIndex = 0
+        panel.panelMode = .slice2D
         panel.windowWidth = 0  // Reset W/L for new series assignment
         panel.windowCenter = 0
         if let first = allSeries[seriesIndex].images.first {
@@ -2396,6 +2406,7 @@ class DICOMModel: ObservableObject {
             if panel.seriesIndex < allSeries.count - 1 {
                 panel.seriesIndex += 1
                 panel.imageIndex = 0
+                panel.panelMode = .slice2D
                 panel.windowWidth = 0  // Reset W/L for new series
                 panel.windowCenter = 0
                 let series = allSeries[panel.seriesIndex]
@@ -2408,6 +2419,7 @@ class DICOMModel: ObservableObject {
             if panel.seriesIndex > 0 {
                 panel.seriesIndex -= 1
                 panel.imageIndex = 0
+                panel.panelMode = .slice2D
                 panel.windowWidth = 0  // Reset W/L for new series
                 panel.windowCenter = 0
                 let series = allSeries[panel.seriesIndex]
@@ -3297,16 +3309,16 @@ class DICOMModel: ObservableObject {
     // MARK: - Volume Building & MPR
 
     /// Get or build a volume for the given series (returns cached if available)
-    func getVolume(for seriesIndex: Int, completion: @escaping (VolumeData?) -> Void) {
+    func getVolume(for seriesIndex: Int, completion: @escaping (VolumeData?, String?) -> Void) {
         guard seriesIndex >= 0, seriesIndex < allSeries.count else {
-            completion(nil)
+            completion(nil, nil)
             return
         }
         let series = allSeries[seriesIndex]
 
         // Return cached volume
         if let cached = volumeCache[series.id] {
-            completion(cached)
+            completion(cached, nil)
             return
         }
 
@@ -3333,14 +3345,14 @@ class DICOMModel: ObservableObject {
                     self.volumeCache[series.id] = volume
                     self.isVolumeBuildingInProgress = false
                     self.volumeBuildProgress = 1.0
-                    completion(volume)
+                    completion(volume, nil)
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.isVolumeBuildingInProgress = false
-                    self.errorMessage = "Volume build failed: \(error)"
-                    print("Volume build error: \(error)")
-                    completion(nil)
+                    let msg = "\(error)"
+                    print("Volume build error: \(msg)")
+                    completion(nil, msg)
                 }
             }
         }
@@ -3352,7 +3364,7 @@ class DICOMModel: ObservableObject {
         panel.isLoading = true
         panel.errorMessage = nil
 
-        getVolume(for: panel.seriesIndex) { [weak self, weak panel] volume in
+        getVolume(for: panel.seriesIndex) { [weak self, weak panel] volume, errorMsg in
             guard let self = self, let panel = panel else { return }
 
             guard let volume = volume else {
@@ -3360,7 +3372,7 @@ class DICOMModel: ObservableObject {
                 if self.isScanning {
                     panel.errorMessage = "Volume build failed — directory is still scanning. Please wait for scanning to complete and try again."
                 } else {
-                    panel.errorMessage = "Volume build failed — series may lack spatial metadata or have too few slices"
+                    panel.errorMessage = "Volume build failed — \(errorMsg ?? "unknown error")"
                 }
                 return
             }
@@ -3553,7 +3565,7 @@ class DICOMModel: ObservableObject {
         panel.isLoading = true
         panel.errorMessage = nil
 
-        getVolume(for: panel.seriesIndex) { [weak self, weak panel] volume in
+        getVolume(for: panel.seriesIndex) { [weak self, weak panel] volume, errorMsg in
             guard let self = self, let panel = panel else { return }
 
             guard let volume = volume else {
@@ -3561,7 +3573,7 @@ class DICOMModel: ObservableObject {
                 if self.isScanning {
                     panel.errorMessage = "Volume build failed — directory is still scanning. Please wait for scanning to complete and try again."
                 } else {
-                    panel.errorMessage = "Volume build failed — series may lack spatial metadata or have too few slices"
+                    panel.errorMessage = "Volume build failed — \(errorMsg ?? "unknown error")"
                 }
                 return
             }
