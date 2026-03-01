@@ -307,135 +307,15 @@
       z-index: 1;
     }
 
-    .screenshot-frame {
-      position: relative;
+    .hero-screenshot img {
       width: 100%;
-      aspect-ratio: 16 / 10;
+      height: auto;
       border-radius: 16px;
-      background: linear-gradient(145deg, #0f0f1a 0%, #0a0a12 100%);
       border: 1px solid var(--border-medium);
-      overflow: hidden;
       box-shadow:
         0 0 0 1px rgba(255,255,255,0.03),
         0 24px 80px rgba(0,0,0,0.5),
         0 8px 24px rgba(0,0,0,0.3);
-    }
-
-    .screenshot-titlebar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 14px 18px;
-      background: rgba(255,255,255,0.02);
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .screenshot-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-    }
-
-    .screenshot-dot:nth-child(1) { background: #ff5f57; }
-    .screenshot-dot:nth-child(2) { background: #febc2e; }
-    .screenshot-dot:nth-child(3) { background: #28c840; }
-
-    .screenshot-content {
-      display: grid;
-      grid-template-columns: 180px 1fr 1fr;
-      gap: 1px;
-      height: calc(100% - 42px);
-      background: rgba(255,255,255,0.02);
-    }
-
-    .screenshot-sidebar {
-      background: rgba(255,255,255,0.015);
-      padding: 16px 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .screenshot-sidebar-label {
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-tertiary);
-      padding: 0 8px;
-      margin-bottom: 4px;
-    }
-
-    .screenshot-thumb {
-      height: 36px;
-      border-radius: 6px;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border-subtle);
-    }
-
-    .screenshot-thumb.active {
-      border-color: var(--accent);
-      background: rgba(59, 130, 246, 0.08);
-    }
-
-    .screenshot-panel {
-      position: relative;
-      background: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    }
-
-    .screenshot-panel::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(ellipse at center, rgba(59, 130, 246, 0.03) 0%, transparent 70%);
-    }
-
-    .screenshot-dicom-mock {
-      width: 70%;
-      height: 70%;
-      border-radius: 50%;
-      background: radial-gradient(ellipse at 40% 40%,
-        rgba(180, 200, 220, 0.25) 0%,
-        rgba(120, 140, 160, 0.15) 30%,
-        rgba(60, 70, 80, 0.1) 60%,
-        transparent 80%
-      );
-      position: relative;
-    }
-
-    .screenshot-overlay-tl,
-    .screenshot-overlay-br {
-      position: absolute;
-      font-size: 9px;
-      font-family: var(--font-mono);
-      color: rgba(255,255,255,0.35);
-      padding: 8px 10px;
-      line-height: 1.5;
-    }
-
-    .screenshot-overlay-tl { top: 0; left: 0; }
-    .screenshot-overlay-br { bottom: 0; right: 0; text-align: right; }
-
-    .screenshot-crosshair {
-      position: absolute;
-      top: 50%;
-      left: 0;
-      right: 0;
-      height: 1px;
-      background: rgba(59, 130, 246, 0.3);
-    }
-
-    .screenshot-crosshair-v {
-      position: absolute;
-      left: 50%;
-      top: 0;
-      bottom: 0;
-      width: 1px;
-      background: rgba(6, 182, 212, 0.3);
     }
 
     .screenshot-glow {
@@ -800,12 +680,6 @@
       .start-grid {
         grid-template-columns: 1fr;
       }
-      .screenshot-content {
-        grid-template-columns: 1fr 1fr;
-      }
-      .screenshot-sidebar {
-        display: none;
-      }
     }
 
     @media (max-width: 640px) {
@@ -835,9 +709,6 @@
       .footer-inner {
         flex-direction: column;
         text-align: center;
-      }
-      .screenshot-frame {
-        border-radius: 10px;
       }
     }
   </style>
@@ -892,38 +763,10 @@
     </div>
     <p class="hero-note reveal reveal-delay-4">Requires macOS 14.0+ (Sonoma) &middot; Apple Silicon</p>
 
-    <!-- Screenshot mockup -->
+    <!-- Screenshot -->
     <div class="hero-screenshot reveal reveal-delay-5">
       <div class="screenshot-glow"></div>
-      <div class="screenshot-frame">
-        <div class="screenshot-titlebar">
-          <div class="screenshot-dot"></div>
-          <div class="screenshot-dot"></div>
-          <div class="screenshot-dot"></div>
-        </div>
-        <div class="screenshot-content">
-          <div class="screenshot-sidebar">
-            <div class="screenshot-sidebar-label">Series</div>
-            <div class="screenshot-thumb active"></div>
-            <div class="screenshot-thumb"></div>
-            <div class="screenshot-thumb"></div>
-            <div class="screenshot-thumb"></div>
-            <div class="screenshot-thumb"></div>
-          </div>
-          <div class="screenshot-panel">
-            <div class="screenshot-dicom-mock"></div>
-            <div class="screenshot-overlay-tl">Ax T2<br>256&times;256<br>W:400 L:40</div>
-            <div class="screenshot-overlay-br">IM: 12/48<br>5.0mm</div>
-            <div class="screenshot-crosshair"></div>
-            <div class="screenshot-crosshair-v"></div>
-          </div>
-          <div class="screenshot-panel">
-            <div class="screenshot-dicom-mock" style="background: radial-gradient(ellipse at 55% 45%, rgba(200,210,220,0.2) 0%, rgba(100,120,140,0.12) 35%, rgba(40,50,60,0.08) 65%, transparent 85%);"></div>
-            <div class="screenshot-overlay-tl">Sag T1<br>512&times;512<br>W:350 L:50</div>
-            <div class="screenshot-overlay-br">IM: 8/24<br>3.0mm</div>
-          </div>
-        </div>
-      </div>
+      <img src="screenshot.png" alt="OpenDicomViewer — multi-panel DICOM viewer with MPR reconstruction">
     </div>
   </section>
 
