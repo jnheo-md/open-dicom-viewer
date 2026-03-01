@@ -1,8 +1,22 @@
-# OpenDicomViewer
+<p align="center">
+  <img src="docs/icon.png" alt="OpenDicomViewer" width="128">
+</p>
 
-**A free, native macOS DICOM viewer — fast, lightweight, and built for customization.**
+<h1 align="center">OpenDicomViewer</h1>
 
-<!-- ![Screenshot](screenshot.png) -->
+<p align="center">
+  <strong>A free, native macOS DICOM viewer — designed not just for use, but for adaptation.</strong><br>
+  In the era of AI, everyone can customize open-source software to meet their own needs.<br>
+  Fork it, modify it with an AI assistant, and make it yours.
+</p>
+
+<p align="center">
+  <a href="https://jnheo-md.github.io/open-dicom-viewer">Website</a> &middot;
+  <a href="https://github.com/jnheo-md/open-dicom-viewer/releases/latest/download/OpenDicomViewer.dmg">Download DMG</a> &middot;
+  <a href="https://github.com/jnheo-md/open-dicom-viewer/releases">Releases</a>
+</p>
+
+![Screenshot](screenshot.png)
 
 ## Why OpenDicomViewer?
 
@@ -17,17 +31,18 @@
 
 ### Viewing & Navigation
 - **Fast DICOM Parsing** — Custom pure-Swift parser with incremental directory scanning; first image displays instantly while the rest of the study loads in the background
-- **Multi-Panel Layouts** — Single, side-by-side (2x1), stacked (1x2), and quad (2x2) panel arrangements with drag-and-drop series assignment
+- **Multi-Panel Layouts** — Single, side-by-side (2x1), stacked (1x2), and quad (2x2) panel arrangements with drag-and-drop series assignment. A miniature panel grid icon next to each series in the sidebar shows exactly which pane displays which series.
 - **Fullscreen Panel** — Double-click any panel to toggle fullscreen mode
 - **Series Thumbnails** — Automatic thumbnail generation for the sidebar series list
-- **Scrollbar with Preview** — Drag or hover the right-side scrollbar for rapid navigation with thumbnail previews
+- **Scrollbar with Thumbnail Preview** — Drag or hover the right-side scrollbar to see a thumbnail preview of any slice and navigate rapidly through hundreds of images
 
 ### Reconstruction & Rendering
-- **MPR Reconstruction** — One-click multi-planar reformatting: axial, sagittal, coronal, and MIP views from a single series
-- **GPU Volume Rendering** — Metal compute shader for real-time MIP, MinIP, and average intensity projections with adjustable slab thickness
+- **MPR Reconstruction** — One-click sagittal, coronal, and MIP views from any axial series
+- **GPU Volume Rendering** — Metal compute shader for real-time MIP, MinIP, and average intensity projections with adjustable slab thickness for fine control
 
 ### Window/Level & Display
-- **Window/Level Controls** — Interactive right-click drag, W/L tool, auto W/L, ROI-based W/L, and histogram display
+- **Window/Level Controls** — Interactive right-click drag, W/L tool, auto W/L, and ROI-based W/L
+- **Live Histogram with W/L Indicator** — Mini histogram shows pixel value distribution with the current window width and level overlaid, so you can instantly understand the contrast mapping
 - **Display Transforms** — Invert (negative), rotate (90° steps), flip horizontal/vertical
 - **Fit to Window / Reset View** — Quick shortcuts to reset zoom, pan, and W/L
 
@@ -44,7 +59,7 @@
 - **Cross-Reference Lines** — Optional overlay showing where other panels' slice planes intersect the current view
 
 ### Metadata & Overlays
-- **DICOM Tag Inspector** — Browse all DICOM metadata tags for the current image
+- **DICOM Tag Inspector** — Browse all DICOM metadata tags for the active image; automatically updates when switching panels
 - **Cursor Readout** — Real-time HU value, pixel coordinates, and patient coordinates under the cursor
 - **Orientation Labels** — Anatomical direction labels (A/P/R/L/S/I) based on DICOM orientation metadata
 - **JPEG 2000 Support** — Handles compressed transfer syntaxes via DCMTK + OpenJPEG
@@ -67,8 +82,8 @@ Download the latest `.dmg` from [Releases](../../releases), open it, and drag Op
 
 ```bash
 # Clone and build
-git clone https://github.com/jnheo-md/OpenDicomViewer.git
-cd OpenDicomViewer
+git clone https://github.com/jnheo-md/open-dicom-viewer.git
+cd open-dicom-viewer
 
 # Build release and package as .app bundle
 ./scripts/package_app.sh
