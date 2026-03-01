@@ -5,6 +5,9 @@
 set -e
 
 APP_NAME="OpenDicomViewer"
+SIGNING_IDENTITY="Developer ID Application: Joon Heo (KCRAUWJ5MM)"
+NOTARY_PROFILE="OpenDicomViewer"
+
 # Ensure we are in project root
 cd "$(dirname "$0")/.."
 
@@ -66,8 +69,13 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "Ad-hoc code signing..."
-codesign --force --deep -s - "${APP_BUNDLE}"
+echo "Code signing with Developer ID..."
+codesign --force --options runtime --sign "${SIGNING_IDENTITY}" "${MACOS_DIR}/${APP_NAME}"
+codesign --force --options runtime --sign "${SIGNING_IDENTITY}" "${APP_BUNDLE}"
+
+echo "Verifying signature..."
+codesign --verify --deep --strict "${APP_BUNDLE}"
+echo "Signature OK"
 
 echo "Successfully created ${APP_BUNDLE}"
 
@@ -94,6 +102,15 @@ hdiutil create -volname "${APP_NAME}" \
 
 rm -rf "${DMG_TEMP}"
 
-echo "Successfully created ${DMG_NAME}"
+# --- Notarize ---
+echo "Submitting ${DMG_NAME} for notarization..."
+xcrun notarytool submit "${DMG_NAME}" \
+    --keychain-profile "${NOTARY_PROFILE}" \
+    --wait
+
+echo "Stapling notarization ticket..."
+xcrun stapler staple "${DMG_NAME}"
+
 echo ""
+echo "Successfully created and notarized ${DMG_NAME}"
 echo "To install: open ${DMG_NAME} and drag ${APP_NAME} to Applications"
