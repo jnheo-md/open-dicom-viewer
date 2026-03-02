@@ -329,14 +329,7 @@
 
     /* ---- VIDEO ---- */
     #demo {
-      padding: 0 24px 120px;
-      position: relative;
-    }
-
-    .video-wrapper {
-      max-width: 840px;
-      margin: 0 auto;
-      position: relative;
+      background: var(--gradient-section);
     }
 
     .video-container {
@@ -965,20 +958,6 @@
     </div>
   </section>
 
-  <!-- VIDEO DEMO -->
-  <section id="demo">
-    <div class="video-wrapper reveal">
-      <div class="video-container" id="video-facade" role="button" aria-label="Play demo video" tabindex="0">
-        <div class="video-thumb">
-          <img src="https://img.youtube.com/vi/GMLFApt92oE/maxresdefault.jpg" alt="OpenDicomViewer demo video">
-          <div class="video-play-btn">
-            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><polygon points="6,3 21,12 6,21"/></svg>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- WHY -->
   <section id="why">
     <div class="section-inner">
@@ -1029,6 +1008,26 @@
           </div>
           <h3>AI-Friendly Architecture</h3>
           <p>Clean, readable code with minimal abstraction. Designed to be extended with AI coding assistants like Claude or Copilot.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VIDEO DEMO -->
+  <section id="demo">
+    <div class="section-inner" style="max-width: 840px;">
+      <div class="section-header reveal" style="text-align: center;">
+        <p class="section-label">Demo</p>
+        <h2 class="section-title">See it in action.</h2>
+      </div>
+      <div class="reveal">
+        <div class="video-container" id="video-facade" role="button" aria-label="Play demo video" tabindex="0">
+          <div class="video-thumb">
+            <img src="https://img.youtube.com/vi/GMLFApt92oE/maxresdefault.jpg" alt="OpenDicomViewer demo video">
+            <div class="video-play-btn">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><polygon points="6,3 21,12 6,21"/></svg>
+            </div>
+          </div>
         </div>
       </div>
     </div>
