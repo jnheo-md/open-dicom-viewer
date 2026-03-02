@@ -12,6 +12,9 @@ let package = Package(
     products: [
         .executable(name: "OpenDicomViewer", targets: ["OpenDicomViewer"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-testing.git", branch: "main")
+    ],
     targets: [
         .target(
             name: "DCMTKWrapper",
@@ -46,6 +49,13 @@ let package = Package(
         .executableTarget(
             name: "OpenDicomViewer",
             dependencies: ["DCMTKWrapper"]
+        ),
+        .testTarget(
+            name: "OpenDicomViewerTests",
+            dependencies: [
+                "OpenDicomViewer",
+                .product(name: "Testing", package: "swift-testing")
+            ]
         ),
     ]
 )
