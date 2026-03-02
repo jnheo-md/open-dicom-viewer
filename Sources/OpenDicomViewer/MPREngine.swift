@@ -118,6 +118,16 @@ struct VolumeBuilder {
         // Extract RescaleSlope/Intercept from first image tags
         let (slope, intercept) = extractRescaleParams(sorted[0].0, rawDataCache: rawDataCache, dcmtkCache: dcmtkCache)
 
+        // Clear caches for this series to ensure consistent per-slice processing.
+        // Without this, some slices may return DCMTK post-Modality-LUT values
+        // (with RescaleSlope applied) from cache while others return raw values,
+        // causing intensity discontinuities in the volume (visible as slab boundaries
+        // in 3D TOF MRA reconstructions).
+        for (img, _) in sorted {
+            rawDataCache.removeObject(forKey: img.url as NSURL)
+            dcmtkCache.removeObject(forKey: img.url as NSURL)
+        }
+
         // Fill volume slice by slice (using per-slice bit depth/signedness)
         for (sliceIdx, (img, _)) in sorted.enumerated() {
             progress?(Double(sliceIdx) / Double(depth))
