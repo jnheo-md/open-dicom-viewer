@@ -327,6 +327,101 @@
       z-index: -1;
     }
 
+    /* ---- VIDEO ---- */
+    #demo {
+      padding: 0 24px 120px;
+      position: relative;
+    }
+
+    .video-wrapper {
+      max-width: 840px;
+      margin: 0 auto;
+      position: relative;
+    }
+
+    .video-container {
+      position: relative;
+      width: 100%;
+      padding-bottom: 56.25%; /* 16:9 */
+      border-radius: 16px;
+      overflow: hidden;
+      background: #000;
+      border: 1px solid var(--border-medium);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.03),
+        0 24px 80px rgba(0,0,0,0.5),
+        0 8px 24px rgba(0,0,0,0.3);
+      cursor: pointer;
+    }
+
+    .video-container::before {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(59,130,246,0.1), transparent 40%, transparent 60%, rgba(6,182,212,0.08));
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .video-thumb {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.3s ease;
+    }
+
+    .video-thumb img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .video-play-btn {
+      position: relative;
+      z-index: 2;
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s var(--ease-out-expo);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+
+    .video-container:hover .video-play-btn {
+      background: rgba(59, 130, 246, 0.8);
+      border-color: rgba(96, 165, 250, 0.4);
+      transform: scale(1.08);
+      box-shadow: 0 8px 32px rgba(59, 130, 246, 0.35);
+    }
+
+    .video-play-btn svg {
+      width: 28px;
+      height: 28px;
+      fill: #fff;
+      margin-left: 3px;
+    }
+
+    .video-container iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 3;
+      border: none;
+    }
+
     /* ---- SECTIONS ---- */
     section {
       padding: 120px 24px;
@@ -823,6 +918,7 @@
         OpenDicomViewer
       </a>
       <ul class="nav-links">
+        <li class="nav-hide-mobile"><a href="#demo">Demo</a></li>
         <li class="nav-hide-mobile"><a href="#why">Why</a></li>
         <li class="nav-hide-mobile"><a href="#features">Features</a></li>
         <li class="nav-hide-mobile"><a href="#start">Get Started</a></li>
@@ -866,6 +962,20 @@
     <div class="hero-screenshot reveal reveal-delay-5">
       <div class="screenshot-glow"></div>
       <img src="screenshot.png" alt="OpenDicomViewer — multi-panel DICOM viewer with MPR reconstruction">
+    </div>
+  </section>
+
+  <!-- VIDEO DEMO -->
+  <section id="demo">
+    <div class="video-wrapper reveal">
+      <div class="video-container" id="video-facade" role="button" aria-label="Play demo video" tabindex="0">
+        <div class="video-thumb">
+          <img src="https://img.youtube.com/vi/GMLFApt92oE/maxresdefault.jpg" alt="OpenDicomViewer demo video">
+          <div class="video-play-btn">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><polygon points="6,3 21,12 6,21"/></svg>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1139,6 +1249,32 @@
         });
       }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
       els.forEach(function(el) { observer.observe(el); });
+    })();
+
+    // Click-to-play YouTube facade
+    (function() {
+      var facade = document.getElementById('video-facade');
+      if (!facade) return;
+      function loadVideo() {
+        var iframe = document.createElement('iframe');
+        iframe.src = 'https://www.youtube-nocookie.com/embed/GMLFApt92oE?autoplay=1&rel=0&modestbranding=1';
+        iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+        iframe.allowFullscreen = true;
+        var thumb = facade.querySelector('.video-thumb');
+        if (thumb) thumb.style.display = 'none';
+        facade.appendChild(iframe);
+        facade.style.cursor = 'default';
+        facade.removeEventListener('click', loadVideo);
+        facade.removeEventListener('keydown', handleKey);
+      }
+      function handleKey(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          loadVideo();
+        }
+      }
+      facade.addEventListener('click', loadVideo);
+      facade.addEventListener('keydown', handleKey);
     })();
   </script>
 
