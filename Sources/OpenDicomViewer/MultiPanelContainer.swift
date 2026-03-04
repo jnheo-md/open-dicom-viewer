@@ -344,6 +344,10 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
         private var scrollAccumulator: CGFloat = 0.0
         private var roiStartPixel: CGPoint?  // ROI drag start in pixel coords
         private var isCrosshairCursorActive: Bool = false
+        private var wlPendingDeltaWidth: Double = 0
+        private var wlPendingDeltaCenter: Double = 0
+        private var wlLastRenderTime: CFTimeInterval = 0
+        private let wlRenderInterval: CFTimeInterval = 1.0 / 60.0
 
         // In-progress annotation state
         private var rulerStartPixel: CGPoint?
@@ -646,6 +650,8 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
 
             case .windowLevel:
                 lastDragLocation = event.locationInWindow
+                wlPendingDeltaWidth = 0
+                wlPendingDeltaCenter = 0
 
             case .zoom:
                 lastDragLocation = event.locationInWindow
@@ -847,11 +853,13 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                     model.activePanelID = panel.id
                 }
             }
+            wlPendingDeltaWidth = 0
+            wlPendingDeltaCenter = 0
             lastDragLocation = event.locationInWindow
         }
 
         override func rightMouseDragged(with event: NSEvent) {
-            guard let start = lastDragLocation, let model = model, let panel = panel else { return }
+            guard let start = lastDragLocation, let panel = panel else { return }
             let current = event.locationInWindow
 
             let dx = Double(current.x - start.x)
@@ -861,9 +869,15 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
             let dynamicFactor = max(0.1, currentWW / 500.0)
             let sensitivity: Double = 1.0 * dynamicFactor
 
-            model.adjustWindowLevelForPanel(panel, deltaWidth: dx * sensitivity, deltaCenter: dy * sensitivity)
-            applyFilters()
+            wlPendingDeltaWidth += dx * sensitivity
+            wlPendingDeltaCenter += dy * sensitivity
+            flushPendingWindowLevelIfNeeded(force: false)
             lastDragLocation = current
+        }
+
+        override func rightMouseUp(with event: NSEvent) {
+            flushPendingWindowLevelIfNeeded(force: true)
+            lastDragLocation = nil
         }
 
         override func mouseDragged(with event: NSEvent) {
@@ -903,8 +917,9 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 let currentWW = panel.windowWidth
                 let dynamicFactor = max(0.1, currentWW / 500.0)
                 let sensitivity: Double = 1.0 * dynamicFactor
-                model.adjustWindowLevelForPanel(panel, deltaWidth: dx * sensitivity, deltaCenter: dy * sensitivity)
-                applyFilters()
+                wlPendingDeltaWidth += dx * sensitivity
+                wlPendingDeltaCenter += dy * sensitivity
+                flushPendingWindowLevelIfNeeded(force: false)
                 lastDragLocation = current
 
             case .zoom:
@@ -979,11 +994,28 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 panel.roiRect = nil
 
             case .windowLevel:
+                flushPendingWindowLevelIfNeeded(force: true)
                 lastDragLocation = nil
 
             default:
                 break
             }
+        }
+
+        private func flushPendingWindowLevelIfNeeded(force: Bool) {
+            guard let model = model, let panel = panel else { return }
+            guard wlPendingDeltaWidth != 0 || wlPendingDeltaCenter != 0 else { return }
+
+            let now = CACurrentMediaTime()
+            if !force && (now - wlLastRenderTime) < wlRenderInterval {
+                return
+            }
+
+            model.adjustWindowLevelForPanel(panel, deltaWidth: wlPendingDeltaWidth, deltaCenter: wlPendingDeltaCenter)
+            applyFilters()
+            wlPendingDeltaWidth = 0
+            wlPendingDeltaCenter = 0
+            wlLastRenderTime = now
         }
 
         // MARK: - Mouse Tracking for HU Readout
