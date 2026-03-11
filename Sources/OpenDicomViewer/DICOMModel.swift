@@ -167,6 +167,8 @@ class DICOMModel: ObservableObject {
     @Published var showCrossReference: Bool = false
     @Published var showTags: Bool = false
     @Published var showHelp: Bool = false
+    @Published var showMCPConsole: Bool = false
+    let mcpAuditLogger = MCPInMemoryAuditLogger()
     @Published var synchronizedScrolling: Bool = false {
         didSet {
             guard synchronizedScrolling, let source = activePanel else { return }

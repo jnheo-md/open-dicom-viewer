@@ -1,0 +1,102 @@
+version: 1
+name: open-dicom-viewer-mcp-policy
+
+roles:
+  radiologist:
+    tools:
+      - dicom.list_series
+      - dicom.get_slice
+      - dicom.get_tags
+      - measure.distance
+      - measure.angle
+      - measure.roi_stats
+      - tracking.find_matching_slice
+      - volume.get_mpr
+    required_scopes:
+      - scope:dicom.read
+      - scope:measure.read
+      - scope:tracking.read
+      - scope:volume.read
+
+  resident:
+    tools:
+      - dicom.list_series
+      - dicom.get_slice
+      - dicom.get_tags
+      - measure.distance
+      - measure.angle
+      - measure.roi_stats
+      - tracking.find_matching_slice
+    required_scopes:
+      - scope:dicom.read
+      - scope:measure.read
+      - scope:tracking.read
+
+  researcher:
+    tools:
+      - dicom.list_series
+      - dicom.get_slice
+      - measure.roi_stats
+      - tracking.find_matching_slice
+    required_scopes:
+      - scope:dicom.read
+      - scope:measure.read
+      - scope:tracking.read
+    deny_tools:
+      - dicom.get_tags
+
+  admin:
+    tools:
+      - dicom.list_series
+      - dicom.get_slice
+      - dicom.get_tags
+      - measure.distance
+      - measure.angle
+      - measure.roi_stats
+      - tracking.find_matching_slice
+      - volume.get_mpr
+    break_glass_required_for:
+      - dicom.get_tags
+
+phi:
+  safe_tag_allowlist:
+    - "(0008,0060)"
+    - "(0020,000D)"
+    - "(0020,000E)"
+    - "(0020,0032)"
+    - "(0020,0037)"
+    - "(0028,0030)"
+  redacted_tag_list:
+    - "(0010,0010)"
+    - "(0010,0020)"
+    - "(0010,0030)"
+    - "(0010,0040)"
+    - "(0010,1000)"
+    - "(0010,1001)"
+  masking_levels:
+    none: "No masking"
+    partial: "Keep prefix, append ***"
+    strict: "Return [REDACTED]"
+
+audit:
+  enabled: true
+  required_fields:
+    - event_id
+    - timestamp
+    - user_id
+    - role
+    - tool
+    - request_id
+    - status
+    - latency_ms
+    - phi_accessed
+    - masking_level
+  retention_days: 365
+
+rate_limit:
+  dicom.get_slice:
+    requests_per_minute: 30
+  volume.get_mpr:
+    requests_per_minute: 10
+  dicom.get_tags:
+    requests_per_minute: 20

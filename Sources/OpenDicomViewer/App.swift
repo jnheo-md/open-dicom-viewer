@@ -148,6 +148,13 @@ struct OpenDicomViewerApp: App {
                 Button("Eraser (E)") { model.activeTool = .eraser }
             }
 
+            CommandMenu("MCP") {
+                Button("Open MCP Console") {
+                    model.showMCPConsole = true
+                }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+            }
+
             CommandGroup(replacing: .help) {
                 Button("OpenDicomViewer Help") {
                     model.showHelp = true

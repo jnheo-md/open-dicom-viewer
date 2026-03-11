@@ -277,6 +277,9 @@ struct ContentView: View {
         .sheet(isPresented: $model.showHelp) {
             HelpView()
         }
+        .sheet(isPresented: $model.showMCPConsole) {
+            MCPConsoleView(model: model)
+        }
         .preferredColorScheme(.dark)
         .background(WindowAccessor())
     }
