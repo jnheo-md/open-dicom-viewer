@@ -20,7 +20,178 @@ import SwiftUI
 import UniformTypeIdentifiers
 import QuartzCore
 
+struct EmptyStateView: View {
+    let title: String
+    let systemImage: String
+    let description: String?
 
+    init(_ title: String, systemImage: String, description: String? = nil) {
+        self.title = title
+        self.systemImage = systemImage
+        self.description = description
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 32))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+            if let description {
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding()
+    }
+}
+
+private struct TagsInspectorContent: View {
+    let activePanelID: UUID
+    let tags: [DicomElement]
+
+    var body: some View {
+        Group {
+            if tags.isEmpty {
+                EmptyStateView("No Tags", systemImage: "tag.slash")
+            } else {
+                TagView(tags: tags)
+            }
+        }
+        .id(activePanelID)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func tagInspectorCompat(isPresented: Binding<Bool>, activePanelID: UUID, tags: [DicomElement]) -> some View {
+        if #available(macOS 14.0, *) {
+            self.inspector(isPresented: isPresented) {
+                TagsInspectorContent(activePanelID: activePanelID, tags: tags)
+            }
+        } else {
+            self.sheet(isPresented: isPresented) {
+                TagsInspectorContent(activePanelID: activePanelID, tags: tags)
+                    .frame(minWidth: 320, minHeight: 480)
+            }
+        }
+    }
+
+    @ViewBuilder
+    func rootKeyboardShortcuts(model: DICOMModel, cyclePanelForward: @escaping () -> Void) -> some View {
+        if #available(macOS 14.0, *) {
+            self
+                .onKeyPress(.leftArrow) {
+                    if let panel = model.activePanel {
+                        model.navigatePanel(panel, direction: .prevSeries)
+                    }
+                    return .handled
+                }
+                .onKeyPress(.rightArrow) {
+                    if let panel = model.activePanel {
+                        model.navigatePanel(panel, direction: .nextSeries)
+                    }
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    if let panel = model.activePanel {
+                        model.navigatePanel(panel, direction: .prevImage)
+                    }
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    if let panel = model.activePanel {
+                        model.navigatePanel(panel, direction: .nextImage)
+                    }
+                    return .handled
+                }
+                .onKeyPress(.tab) {
+                    cyclePanelForward()
+                    return .handled
+                }
+                .onKeyPress(.pageUp) {
+                    if let panel = model.activePanel {
+                        model.navigatePanelByOffset(panel, offset: -10)
+                    }
+                    return .handled
+                }
+                .onKeyPress(.pageDown) {
+                    if let panel = model.activePanel {
+                        model.navigatePanelByOffset(panel, offset: 10)
+                    }
+                    return .handled
+                }
+                .onKeyPress(.home) {
+                    if let panel = model.activePanel {
+                        model.navigatePanelToEdge(panel, toFirst: true)
+                    }
+                    return .handled
+                }
+                .onKeyPress(.end) {
+                    if let panel = model.activePanel {
+                        model.navigatePanelToEdge(panel, toFirst: false)
+                    }
+                    return .handled
+                }
+                .onKeyPress(phases: .down) { press in
+                    if press.key == .space {
+                        if let panel = model.activePanel, panel.isMultiFrame && panel.numberOfFrames > 1 {
+                            model.toggleCinePlayback(panel)
+                            return .handled
+                        }
+                    }
+
+                    if press.key == .escape {
+                        if model.groupSelectedPanels.count > 0 {
+                            model.clearGroupSelection()
+                            return .handled
+                        }
+                    }
+
+                    return .ignored
+                }
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func detailKeyboardShortcuts(model: DICOMModel) -> some View {
+        if #available(macOS 14.0, *) {
+            self
+                .onKeyPress(.leftArrow) {
+                    model.prevSeries()
+                    return .handled
+                }
+                .onKeyPress(.rightArrow) {
+                    model.nextSeries()
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    model.prevImage()
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    model.nextImage()
+                    return .handled
+                }
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func focusEffectCompatDisabled() -> some View {
+        if #available(macOS 14.0, *) {
+            self.focusEffectDisabled()
+        } else {
+            self
+        }
+    }
+}
 
 struct ContentView: View {
     @ObservedObject var model: DICOMModel
@@ -31,7 +202,6 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(model: model, columnVisibility: $columnVisibility)
             .navigationSplitViewColumnWidth(min: 250, ideal: 300)
-            .toolbar(removing: .sidebarToggle)
         } detail: {
             HStack(spacing: 0) {
                 // Fixed tool palette column
@@ -103,91 +273,12 @@ struct ContentView: View {
         .focusable()
         .focused($isFocused)
         .onAppear { isFocused = true }
-        .onKeyPress(.leftArrow) {
-            if let panel = model.activePanel {
-                model.navigatePanel(panel, direction: .prevSeries)
-            }
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            if let panel = model.activePanel {
-                model.navigatePanel(panel, direction: .nextSeries)
-            }
-            return .handled
-        }
-        .onKeyPress(.upArrow) {
-            if let panel = model.activePanel {
-                model.navigatePanel(panel, direction: .prevImage)
-            }
-            return .handled
-        }
-        .onKeyPress(.downArrow) {
-            if let panel = model.activePanel {
-                model.navigatePanel(panel, direction: .nextImage)
-            }
-            return .handled
-        }
-        .onKeyPress(.tab) {
-            cyclePanelForward()
-            return .handled
-        }
-        .onKeyPress(.pageUp) {
-            if let panel = model.activePanel {
-                model.navigatePanelByOffset(panel, offset: -10)
-            }
-            return .handled
-        }
-        .onKeyPress(.pageDown) {
-            if let panel = model.activePanel {
-                model.navigatePanelByOffset(panel, offset: 10)
-            }
-            return .handled
-        }
-        .onKeyPress(.home) {
-            if let panel = model.activePanel {
-                model.navigatePanelToEdge(panel, toFirst: true)
-            }
-            return .handled
-        }
-        .onKeyPress(.end) {
-            if let panel = model.activePanel {
-                model.navigatePanelToEdge(panel, toFirst: false)
-            }
-            return .handled
-        }
-        .onKeyPress(phases: .down) { press in
-            // Letter/number shortcuts are handled by NSEvent keyDown monitor in DICOMModel
-            // (works regardless of input method). This handler covers special keys only.
-
-            // Space = Toggle cine playback
-            if press.key == .space {
-                if let panel = model.activePanel, panel.isMultiFrame && panel.numberOfFrames > 1 {
-                    model.toggleCinePlayback(panel)
-                    return .handled
-                }
-            }
-
-            // Escape = Clear group selection
-            if press.key == .escape {
-                if model.groupSelectedPanels.count > 0 {
-                    model.clearGroupSelection()
-                    return .handled
-                }
-            }
-
-            return .ignored
-        }
-        .inspector(isPresented: $model.showTags) {
-            Group {
-                let activeTags = model.activePanel?.tags ?? []
-                if activeTags.isEmpty {
-                    ContentUnavailableView("No Tags", systemImage: "tag.slash")
-                } else {
-                    TagView(tags: activeTags)
-                }
-            }
-            .id(model.activePanelID)
-        }
+        .rootKeyboardShortcuts(model: model, cyclePanelForward: cyclePanelForward)
+        .tagInspectorCompat(
+            isPresented: $model.showTags,
+            activePanelID: model.activePanelID,
+            tags: model.activePanel?.tags ?? []
+        )
         .sheet(isPresented: $model.showHelp) {
             HelpView()
         }
@@ -338,11 +429,11 @@ struct SeriesListView: View {
                              .controlSize(.regular)
                      }
                  } else {
-                     ContentUnavailableView {
-                         Label("No Series Found", systemImage: "folder.badge.questionmark")
-                     } description: {
-                         Text("Drag a FOLDER to this window to scan for all series.")
-                     }
+                     EmptyStateView(
+                         "No Series Found",
+                         systemImage: "folder.badge.questionmark",
+                         description: "Drag a FOLDER to this window to scan for all series."
+                     )
                  }
              }
         }
@@ -455,16 +546,12 @@ struct DetailView: View {
                      .frame(maxWidth: .infinity, maxHeight: .infinity)
                      .zIndex(0)
             } else if model.errorMessage == nil && !model.isLoading {
-                ContentUnavailableView("No Image Selected", systemImage: "photo")
+                EmptyStateView("No Image Selected", systemImage: "photo")
             }
 
             // Error Overlay
             if let error = model.errorMessage {
-                ContentUnavailableView {
-                    Label("Error", systemImage: "exclamationmark.triangle")
-                } description: {
-                     Text(error).font(.caption)
-                }
+                EmptyStateView("Error", systemImage: "exclamationmark.triangle", description: error)
                 .background(Color.black.opacity(0.8))
                 .zIndex(200)
             }
@@ -539,25 +626,10 @@ struct DetailView: View {
             // Keyboard Handling (Backup for SwiftUI Focus)
             ZStack { Color.clear }
             .focusable()
-            .focusEffectDisabled()
+            .focusEffectCompatDisabled()
             .focused($isFocused)
             .onAppear { isFocused = true }
-            .onKeyPress(.leftArrow) {
-                model.prevSeries()
-                return .handled
-            }
-            .onKeyPress(.rightArrow) {
-                model.nextSeries()
-                return .handled
-            }
-            .onKeyPress(.upArrow) {
-                model.prevImage()
-                return .handled
-            }
-            .onKeyPress(.downArrow) {
-                model.nextImage()
-                return .handled
-            }
+            .detailKeyboardShortcuts(model: model)
         }
     }
 }

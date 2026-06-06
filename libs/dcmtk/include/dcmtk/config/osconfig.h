@@ -48,10 +48,10 @@
 /* #undef C_RIGHTSHIFT_UNSIGNED */
 
 /* Define the DCMTK default path */
-#define DCMTK_PREFIX "/Volumes/eDrive/LocalDev/macomviewer/libs/dcmtk"
+#define DCMTK_PREFIX "/Volumes/eDrive/LocalDev/OpenDicomViewer-ventura/libs/dcmtk"
 
 /* Define the default data dictionary path for the dcmdata library package */
-#define DCM_DICT_DEFAULT_PATH "/Volumes/eDrive/LocalDev/macomviewer/libs/dcmtk/share/dcmtk-3.6.8/dicom.dic"
+#define DCM_DICT_DEFAULT_PATH "/Volumes/eDrive/LocalDev/OpenDicomViewer-ventura/libs/dcmtk/share/dcmtk-3.6.8/dicom.dic"
 
 /* Define the type of standard dictionary that we want to use:
    0 - Do not load any default dictionary on startup
@@ -868,10 +868,10 @@
 #define PACKAGE_STRING ""
 
 /* Define to the default configuration directory (used by some applications) */
-#define DEFAULT_CONFIGURATION_DIR "/Volumes/eDrive/LocalDev/macomviewer/libs/dcmtk/etc/dcmtk-3.6.8/"
+#define DEFAULT_CONFIGURATION_DIR "/Volumes/eDrive/LocalDev/OpenDicomViewer-ventura/libs/dcmtk/etc/dcmtk-3.6.8/"
 
 /* Define to the default support data directory (used by some applications) */
-#define DEFAULT_SUPPORT_DATA_DIR "/Volumes/eDrive/LocalDev/macomviewer/libs/dcmtk/share/dcmtk-3.6.8/"
+#define DEFAULT_SUPPORT_DATA_DIR "/Volumes/eDrive/LocalDev/OpenDicomViewer-ventura/libs/dcmtk/share/dcmtk-3.6.8/"
 
 /* Define to the one symbol short name of this package. */
 /* #undef PACKAGE_TARNAME */

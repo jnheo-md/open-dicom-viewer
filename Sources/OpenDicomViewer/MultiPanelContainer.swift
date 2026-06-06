@@ -224,11 +224,7 @@ struct PanelView: View {
 
             // Error Overlay
             if let error = panel.errorMessage {
-                ContentUnavailableView {
-                    Label("Error", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(error).font(.caption)
-                }
+                EmptyStateView("Error", systemImage: "exclamationmark.triangle", description: error)
                 .background(Color.black.opacity(0.8))
                 .zIndex(200)
             }

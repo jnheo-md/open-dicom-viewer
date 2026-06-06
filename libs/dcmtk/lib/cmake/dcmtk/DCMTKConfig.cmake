@@ -114,7 +114,7 @@ set(DCMTK_CMAKE_INSTALL_INCLUDEDIR include)
 set(DCMTK_CMAKE_INSTALL_LIBDIR lib)
 set(DCMTK_CMAKE_INSTALL_DATAROOTDIR share)
 
-set(DCMTK_CMAKE_INSTALL_PREFIX "/Volumes/eDrive/LocalDev/macomviewer/libs/dcmtk")
+set(DCMTK_CMAKE_INSTALL_PREFIX "/Volumes/eDrive/LocalDev/OpenDicomViewer-ventura/libs/dcmtk")
 
 
 SET_AND_CHECK(DCMTK_TARGETS "${PACKAGE_PREFIX_DIR}/lib/cmake/dcmtk/DCMTKTargets.cmake")

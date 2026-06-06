@@ -8,6 +8,8 @@ set -e
 APP_NAME="OpenDicomViewer"
 BUILD_DIR=".build/release"
 APP_BUNDLE="$APP_NAME.app"
+MACOS_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"
+export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
 
 # Load Signing Config if available
 if [ -f "scripts/build_config.sh" ]; then
@@ -47,7 +49,7 @@ else
     <key>CFBundleVersion</key>
     <string>6</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>$MACOS_DEPLOYMENT_TARGET</string>
 </dict>
 </plist>
 EOF

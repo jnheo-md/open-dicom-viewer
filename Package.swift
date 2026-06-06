@@ -7,7 +7,7 @@ import PackageDescription
 let package = Package(
     name: "OpenDicomViewer",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v13)
     ],
     products: [
         .executable(name: "OpenDicomViewer", targets: ["OpenDicomViewer"]),

@@ -1,4 +1,4 @@
-prefix=/Volumes/eDrive/LocalDev/macomviewer/libs/openjpeg
+prefix=/Volumes/eDrive/LocalDev/OpenDicomViewer-ventura/libs/openjpeg
 bindir=${prefix}/bin
 mandir=${prefix}/
 docdir=${prefix}/

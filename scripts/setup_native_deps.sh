@@ -11,6 +11,9 @@ TEMP_DIR="$PROJECT_ROOT/temp_build"
 CMAKE_DIR="$TEMP_DIR/cmake"
 DCMTK_SRC_DIR="$TEMP_DIR/dcmtk-3.6.8"
 INSTALL_DIR="$LIBS_DIR/dcmtk"
+ARCHS="${ARCHS:-arm64;x86_64}"
+MACOS_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"
+PARALLEL_JOBS="${PARALLEL_JOBS:-4}"
 
 mkdir -p "$LIBS_DIR"
 mkdir -p "$TEMP_DIR"
@@ -27,6 +30,8 @@ fi
 
 CMAKE_BIN="$CMAKE_DIR/CMake.app/Contents/bin/cmake"
 echo "Using CMake at: $CMAKE_BIN"
+echo "Building static libraries for architectures: $ARCHS"
+echo "Minimum macOS deployment target: $MACOS_DEPLOYMENT_TARGET"
 
 # 2. Build OpenJPEG (Required for JPEG 2000)
 if [ ! -d "$TEMP_DIR/openjpeg-2.5.0" ]; then
@@ -44,13 +49,14 @@ cd "$TEMP_DIR/openjpeg-2.5.0/build"
     -DCMAKE_INSTALL_PREFIX="$LIBS_DIR/openjpeg" \
     -DBUILD_SHARED_LIBS=OFF \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_OSX_ARCHITECTURES="arm64" \
+    -DCMAKE_OSX_ARCHITECTURES="$ARCHS" \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
     -DBUILD_CODEC=OFF \
     -DCMAKE_DISABLE_FIND_PACKAGE_TIFF=ON \
     -DCMAKE_DISABLE_FIND_PACKAGE_PNG=ON \
     -DCMAKE_DISABLE_FIND_PACKAGE_LCMS2=ON
 
-"$CMAKE_BIN" --build . --target install --parallel 4
+"$CMAKE_BIN" --build . --target install --parallel "$PARALLEL_JOBS"
 
 # 3. Download DCMTK
 if [ ! -d "$DCMTK_SRC_DIR" ]; then
@@ -81,12 +87,13 @@ cd "$DCMTK_SRC_DIR/build"
     -DDCMTK_WITH_OPENSSL=OFF \
     -DDCMTK_WITH_ICONV=OFF \
     -DDCMTK_ENABLE_CXX11=ON \
-    -DCMAKE_OSX_ARCHITECTURES="arm64" \
+    -DCMAKE_OSX_ARCHITECTURES="$ARCHS" \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
     -DDCMTK_WITH_OPENJPEG=ON \
     -DCMAKE_PREFIX_PATH="$LIBS_DIR/openjpeg"
 
 # Build
-"$CMAKE_BIN" --build . --target install --parallel 4
+"$CMAKE_BIN" --build . --target install --parallel "$PARALLEL_JOBS"
 
 echo "DCMTK Installed to $INSTALL_DIR"
 

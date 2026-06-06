@@ -9,19 +9,55 @@ APP_NAME="OpenDicomViewer"
 SIGNING_IDENTITY="Developer ID Application: Joon Heo (KCRAUWJ5MM)"
 NOTARY_PROFILE="OpenDicomViewer"
 NOTARIZE=false
+UNIVERSAL=false
+MACOS_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"
+export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
 
-if [[ "$1" == "--notarize" ]]; then
-    NOTARIZE=true
-fi
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --notarize)
+            NOTARIZE=true
+            ;;
+        --universal)
+            UNIVERSAL=true
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: $0 [--universal] [--notarize]" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 # Ensure we are in project root
 cd "$(dirname "$0")/.."
 
-echo "Building ${APP_NAME} (Release)..."
-swift build -c release --arch arm64
-
 BUILD_DIR=".build/release"
 APP_BUNDLE="${APP_NAME}.app"
+DMG_NAME="${APP_NAME}.dmg"
+
+if $UNIVERSAL; then
+    BUILD_DIR=".build/universal/release"
+    APP_BUNDLE="${APP_NAME}-universal.app"
+    DMG_NAME="${APP_NAME}-universal.dmg"
+
+    echo "Building ${APP_NAME} (Universal Release, macOS ${MACOS_DEPLOYMENT_TARGET}+)..."
+    swift build -c release --arch arm64
+    swift build -c release --arch x86_64
+
+    mkdir -p "${BUILD_DIR}"
+    lipo -create \
+        ".build/arm64-apple-macosx/release/${APP_NAME}" \
+        ".build/x86_64-apple-macosx/release/${APP_NAME}" \
+        -output "${BUILD_DIR}/${APP_NAME}"
+    lipo -info "${BUILD_DIR}/${APP_NAME}"
+else
+    echo "Building ${APP_NAME} (Release, macOS ${MACOS_DEPLOYMENT_TARGET}+)..."
+    swift build -c release --arch arm64
+    BUILD_DIR=".build/arm64-apple-macosx/release"
+fi
+
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
@@ -59,7 +95,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleVersion</key>
     <string>6</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>${MACOS_DEPLOYMENT_TARGET}</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
@@ -88,7 +124,6 @@ fi
 echo "Successfully created ${APP_BUNDLE}"
 
 # --- Create DMG for distribution ---
-DMG_NAME="${APP_NAME}.dmg"
 DMG_TEMP="dmg_tmp"
 
 echo "Creating DMG at ${DMG_NAME}..."

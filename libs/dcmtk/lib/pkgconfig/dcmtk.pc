@@ -1,6 +1,6 @@
-prefix="/Volumes/eDrive/LocalDev/macomviewer/libs/dcmtk"
+prefix="/Volumes/eDrive/LocalDev/OpenDicomViewer-ventura/libs/dcmtk"
 exec_prefix="${prefix}"
-libdir="/Volumes/eDrive/LocalDev/macomviewer/libs/dcmtk/lib"
+libdir="/Volumes/eDrive/LocalDev/OpenDicomViewer-ventura/libs/dcmtk/lib"
 includedir="${prefix}/include/"
 
 Name: DCMTK
