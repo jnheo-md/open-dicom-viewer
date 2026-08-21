@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import DCMTKWrapper
 @testable import OpenDicomViewer
 
 // MARK: - Window/Level Persistence Tests
@@ -202,4 +203,122 @@ func adjustWindowLevelPersistsToSeriesStates() {
     #expect(panel.windowCenter == 400.0)
     #expect(model.seriesStates[uid]?.windowWidth == 1500.0)
     #expect(model.seriesStates[uid]?.windowCenter == 400.0)
+}
+
+// MARK: - Real compressed-DICOM cache regression
+
+@Test
+func jpegLosslessBackgroundCacheRemainsWindowLevelAdjustable() async throws {
+    // Opt-in because the test data is large and intentionally not committed.
+    // Supply two newline-separated files from the same series whose stored
+    // W/L values differ.
+    guard let value = ProcessInfo.processInfo.environment["OPEN_DICOM_MR_TEST_FILES"] else {
+        return
+    }
+    let paths = value.split(separator: "\n").map(String.init)
+    guard paths.count == 2 else {
+        Issue.record("OPEN_DICOM_MR_TEST_FILES must contain two newline-separated paths")
+        return
+    }
+
+    let firstURL = URL(fileURLWithPath: paths[0])
+    let secondURL = URL(fileURLWithPath: paths[1])
+    let firstObject = try #require(DCMTKImageObject(path: firstURL.path))
+
+    func autoWindow(for object: DCMTKImageObject) throws -> (ww: Double, wc: Double) {
+        var width = 0, height = 0, depth = 0, samples = 0
+        var isSigned: ObjCBool = false
+        let raw = try #require(
+            object.getRawDataWidth(
+                &width, height: &height, bitDepth: &depth,
+                samples: &samples, isSigned: &isSigned
+            )
+        )
+        var minValue = Double.greatestFiniteMagnitude
+        var maxValue = -Double.greatestFiniteMagnitude
+        raw.withUnsafeBytes { bytes in
+            if depth > 8, let values = bytes.baseAddress?.assumingMemoryBound(to: UInt16.self) {
+                for index in 0..<(raw.count / 2) {
+                    let value = isSigned.boolValue
+                        ? Double(Int16(bitPattern: values[index]))
+                        : Double(values[index])
+                    minValue = min(minValue, value)
+                    maxValue = max(maxValue, value)
+                }
+            } else if let values = bytes.baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                for index in 0..<raw.count {
+                    let value = Double(values[index])
+                    minValue = min(minValue, value)
+                    maxValue = max(maxValue, value)
+                }
+            }
+        }
+        let ww = max(1, maxValue - minValue)
+        return (ww, minValue + (ww / 2))
+    }
+
+    let reference = try autoWindow(for: firstObject)
+    let referenceWW = reference.ww
+    let referenceWC = reference.wc
+
+    func context(url: URL, instance: Int) -> DicomImageContext {
+        DicomImageContext(
+            url: url,
+            sopInstanceUID: "integration-\(instance)",
+            seriesUID: "integration-series",
+            seriesDescription: "integration",
+            instanceNumber: instance,
+            seriesNumber: 1,
+            zLocation: nil,
+            imagePosition: nil,
+            imageOrientation: nil,
+            pixelSpacing: nil,
+            sliceThickness: nil,
+            spacingBetweenSlices: nil,
+            frameOfReferenceUID: nil,
+            studyInstanceUID: nil,
+            numberOfFrames: 1
+        )
+    }
+
+    let model = DICOMModel()
+    model.allSeries = [
+        DicomSeries(
+            id: "integration-series",
+            seriesNumber: 1,
+            seriesDescription: "integration",
+            images: [context(url: firstURL, instance: 1), context(url: secondURL, instance: 2)]
+        )
+    ]
+
+    // Reproduce the reported path: a compressed non-cover slice is populated
+    // by background caching before the panel navigates to it.
+    model.cacheImageBackground(url: secondURL)
+
+    let panel = PanelState()
+    panel.seriesIndex = 0
+    panel.imageIndex = 1
+    panel.windowWidth = referenceWW
+    panel.windowCenter = referenceWC
+    model.loadSingleFileForPanel(secondURL, panel: panel)
+
+    let deadline = Date().addingTimeInterval(10)
+    while panel.isLoading && Date() < deadline {
+        try await Task.sleep(nanoseconds: 20_000_000)
+    }
+
+    #expect(!panel.isLoading)
+    #expect(panel.errorMessage == nil)
+    #expect(panel.dcmtkImage != nil)
+    #expect(panel.rawPixelData != nil)
+    #expect(panel.windowWidth == referenceWW)
+    #expect(panel.windowCenter == referenceWC)
+
+    let imageBeforeAdjustment = try #require(panel.image)
+    model.adjustWindowLevelForPanel(panel, deltaWidth: 25, deltaCenter: 10)
+    let imageAfterAdjustment = try #require(panel.image)
+
+    #expect(panel.windowWidth == referenceWW + 25)
+    #expect(panel.windowCenter == referenceWC + 10)
+    #expect(imageAfterAdjustment !== imageBeforeAdjustment)
 }

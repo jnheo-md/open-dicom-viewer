@@ -26,7 +26,8 @@ let package = Package(
             cxxSettings: [
                 .headerSearchPath("../../libs/dcmtk/include"),
                 .headerSearchPath("../../libs/openjpeg/include/openjpeg-2.5"),
-                .define("DCMTK_BUILD_IN_PROGRESS")
+                .define("DCMTK_BUILD_IN_PROGRESS"),
+                .unsafeFlags(["-std=c++11"])
             ],
             linkerSettings: [
                 .unsafeFlags(["-Llibs/dcmtk/lib", "-Llibs/openjpeg/lib"]),
