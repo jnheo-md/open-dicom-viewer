@@ -1772,7 +1772,9 @@ class DICOMModel: ObservableObject {
          startSeriesCaching(seriesIndex: self.currentSeriesIndex)
     }
     
-    private func cacheImageBackground(url: URL) {
+    /// Populate the navigation caches without updating visible panel state.
+    /// Kept internal so real-DICOM integration tests can verify cache behavior.
+    func cacheImageBackground(url: URL) {
         // Reduced version of loading just to populate cache
         do {
              let data = try Data(contentsOf: url)
@@ -1811,10 +1813,49 @@ class DICOMModel: ObservableObject {
              if let r = finalRaw {
                  self.rawDataCache.setObject(r as NSData, forKey: url as NSURL)
              } else {
-                 // Compressed / Native failed -> Use DCMTK
-                 if let img = DCMTKHelper.convertDICOM(toNSImage: url.path) {
-                      self.imageCache.setObject(img, forKey: url as NSURL)
-                 } else {
+                 // Compressed images must retain re-renderable data. Caching only
+                 // a pre-rendered NSImage makes subsequent slices ignore the
+                 // series W/L and leaves the W/L controls unable to update them.
+                 var cachedWithDCMTK = false
+                 if let dcmObj = DCMTKImageObject(path: url.path) {
+                     var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
+                     var signed: ObjCBool = false
+                     if let raw = dcmObj.getRawDataWidth(
+                         &w, height: &h, bitDepth: &d,
+                         samples: &s, isSigned: &signed
+                     ) {
+                         var ww = dcmObj.getWindowWidth()
+                         var wc = dcmObj.getWindowCenter()
+                         if ww <= 0 {
+                             let (minVal, maxVal) = self.computeMinMax(
+                                 data: raw, isSigned: signed.boolValue, bits: d
+                             )
+                             ww = max(1.0, maxVal - minVal)
+                             wc = minVal + (ww / 2.0)
+                         }
+
+                         if let img = dcmObj.renderImage(
+                             withWidth: 0, height: 0, ww: ww, wc: wc
+                         ) {
+                             self.imageCache.setObject(img, forKey: url as NSURL)
+                             self.rawDataCache.setObject(raw as NSData, forKey: url as NSURL)
+                             self.dcmtkCache.setObject(dcmObj, forKey: url as NSURL)
+                             self.imageCacheParamsLock.lock()
+                             self.imageCacheParams[url as NSURL] = (ww, wc)
+                             self.imagePixelMeta[url as NSURL] = PixelMeta(
+                                 width: w, height: h, bitDepth: d, samples: s,
+                                 isSigned: signed.boolValue, isMonochrome1: false
+                             )
+                             self.imageCacheParamsLock.unlock()
+                             cachedWithDCMTK = true
+                         }
+                     }
+                 }
+
+                 if !cachedWithDCMTK,
+                    let img = DCMTKHelper.convertDICOM(toNSImage: url.path) {
+                     self.imageCache.setObject(img, forKey: url as NSURL)
+                 } else if !cachedWithDCMTK {
                      // DCMTK failed -> try JPEG2000 fallback via OpenJPEG
                      var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
                      var signed: ObjCBool = false
@@ -3010,7 +3051,13 @@ class DICOMModel: ObservableObject {
                 let meta = self.imagePixelMeta[url as NSURL]
                 self.imageCacheParamsLock.unlock()
 
-                DispatchQueue.main.async {
+                // A display-only cache entry cannot respond to W/L changes.
+                // Ignore it for the main panel and rebuild a complete cache
+                // entry below; it can still have served thumbnail previews.
+                if cachedDCMTK == nil && (cachedRaw == nil || meta == nil) {
+                    self.imageCache.removeObject(forKey: url as NSURL)
+                } else {
+                    DispatchQueue.main.async {
                     panel.rawPixelData = cachedRaw
                     panel.dcmtkImage = cachedDCMTK  // clear stale DCMTK if not cached
 
@@ -3086,7 +3133,8 @@ class DICOMModel: ObservableObject {
                     self.objectWillChange.send()
                     self.updatePanelInfoStrings(panel)
                 }
-                return
+                    return
+                }
             }
 
             // Parse DICOM metadata (64KB cap - all metadata is in the header)
