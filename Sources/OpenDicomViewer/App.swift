@@ -10,11 +10,12 @@ import SwiftUI
 
 @main
 struct OpenDicomViewerApp: App {
-    @StateObject private var model = DICOMModel()
+    @NSApplicationDelegateAdaptor(OpenDicomAppDelegate.self) private var appDelegate
+    @StateObject private var model = OpenDicomAppDelegate.sharedModel
     @StateObject private var updateChecker = UpdateChecker()
 
     var body: some Scene {
-        WindowGroup {
+        Window("OpenDicomViewer", id: "viewer") {
             ContentView(model: model)
                 .task {
                     // Auto-open directory if passed via --benchmark /path
@@ -50,6 +51,8 @@ struct OpenDicomViewerApp: App {
                     model.openFolder()
                 }
                 .keyboardShortcut("o", modifiers: .command)
+
+                RecentOpenMenu(history: model.recentHistory, open: model.load(urls:))
             }
 
             CommandGroup(after: .toolbar) {

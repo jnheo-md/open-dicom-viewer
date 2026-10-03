@@ -464,10 +464,10 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
 
             // 2. File/folder URL from Finder
             if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
-               let url = urls.first,
+               !urls.isEmpty,
                let model = model {
                 DispatchQueue.main.async {
-                    model.load(url: url)
+                    model.load(urls: urls)
                 }
                 return true
             }
@@ -1258,6 +1258,10 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
             }
 
             // Use screenToPixel for HU readout coordinate mapping
+            guard panel.samples == 1, panel.rawPixelData != nil else {
+                panel.showCursorInfo = false
+                return
+            }
             guard let pixelPoint = screenToPixel(event) else {
                 panel.showCursorInfo = false
                 return

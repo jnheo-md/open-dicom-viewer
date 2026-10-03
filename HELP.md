@@ -8,13 +8,17 @@ A native macOS DICOM viewer with multi-panel layouts, MPR reconstruction, measur
 
 ### Opening Files
 
-- **Open Button** -- Click the **Open** button in the sidebar to select a DICOM file (`.dcm`) or a folder containing DICOM files.
-- **Drag & Drop** -- Drag a folder or DICOM file from Finder directly onto the viewer area. The app will scan for all DICOM series automatically.
+- **Open Button** -- Click **Open** in the sidebar or use **File > Open** (`Cmd+O`) to select one or more DICOM files or folders.
+- **Drag & Drop** -- Drop files or folders from Finder onto the viewer or its Dock icon. Multiple items open together in the same window.
+- **Folder Context** -- Opening one file displays that image while listing all DICOM series in its parent folder and subfolders.
+- **Recent History** -- Use **File > Open Recent** or the clock beside Open to reopen one of the last 20 selections, including multi-file selections. History persists between launches and can be removed with **Clear Recent History**.
 - **Sidebar Series List** -- Once loaded, all discovered series appear in the sidebar. Click a series to display it in the active panel. Drag a series from the sidebar onto any panel to assign it.
 
 ### Sidebar
 
 The sidebar shows all loaded series with thumbnails, descriptions, and image counts. A small grid icon next to each series indicates which panel(s) are displaying it. Click the sidebar toggle button to show/hide the sidebar.
+
+Thumbnails show a spinner while queued or processing. If a preview cannot be generated, click its retry arrow. Previews refresh after the folder scan finishes to use a representative image from the complete series.
 
 ---
 

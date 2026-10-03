@@ -13,6 +13,8 @@
 @interface DCMTKHelper : NSObject
 
 + (NSImage *)convertDICOMToNSImage:(NSString *)path;
+/// Monochrome: full-depth values after the modality transform (e.g. HU).
+/// Color: unsigned 8-bit interleaved RGB, including palette/YBR conversion.
 + (NSData *)getRawPixelData:(NSString *)path
                       width:(NSInteger *)width
                      height:(NSInteger *)height
@@ -41,6 +43,7 @@
                            height:(NSInteger)height
                                ww:(double)ww
                                wc:(double)wc;
+/// Same pixel format contract as +getRawPixelData:width:height:bitDepth:samples:isSigned:.
 - (NSData *)getRawDataWidth:(NSInteger *)width
                      height:(NSInteger *)height
                    bitDepth:(NSInteger *)bitDepth

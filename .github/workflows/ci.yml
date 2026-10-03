@@ -17,4 +17,6 @@ jobs:
         run: swift build --arch arm64
 
       - name: Test
+        env:
+          DCMDICTPATH: ${{ github.workspace }}/libs/dcmtk/share/dcmtk-3.6.8/dicom.dic
         run: swift test --arch arm64

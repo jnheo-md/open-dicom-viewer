@@ -104,6 +104,12 @@ func cross(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> SIMD3<Double> {
     )
 }
 
+enum SeriesThumbnailState: Equatable {
+    case loading
+    case ready
+    case failed
+}
+
 // MARK: - Model
 class DICOMModel: ObservableObject {
     // Current State
@@ -122,23 +128,11 @@ class DICOMModel: ObservableObject {
     @Published var selectedDerivedObjectID: URL? = nil
     @Published var currentSeriesIndex: Int = -1 {
         didSet {
-             if currentSeriesIndex != -1 {
-                 // 1. Start Caching (Background)
-                 self.startSeriesCaching(seriesIndex: currentSeriesIndex)
-
-                 // 2. Sync active panel
-                 if let panel = activePanel {
-                     panel.seriesIndex = currentSeriesIndex
-                 }
-
-                 // 3. Load First Image Immediately (Foreground)
-                 if self.isValidIndex() {
-                     // Already valid, maybe just an update?
-                 } else if !self.allSeries[currentSeriesIndex].images.isEmpty {
-                     self.currentImageIndex = 0
-                     self.loadSingleFile(self.allSeries[currentSeriesIndex].images[0].url)
-                 }
-             }
+            guard allSeries.indices.contains(currentSeriesIndex) else { return }
+            startSeriesCaching(seriesIndex: currentSeriesIndex)
+            activePanel?.seriesIndex = currentSeriesIndex
+            // Loading is explicit: a scan can move this index without changing
+            // the selected file, and must never start an unrelated image load.
         }
     }
     @Published var currentImageIndex: Int = -1
@@ -263,10 +257,29 @@ class DICOMModel: ObservableObject {
     
     // Request Token to prevent stale background loads from overriding current view
     private var currentLoadRequestID: UUID = UUID()
+    private var legacyImageRequestID = UUID()
+    private var panelImageRequestIDs: [UUID: UUID] = [:]
+    private var accessedURLs: [URL] = []
+    let recentHistory: RecentOpenHistory
+    private let recordsSystemRecentDocuments: Bool
+    private let scanQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
     private var lastPrecachedSeriesIndex: Int = -1
     
     // Series Thumbnails
     @Published var seriesThumbnails: [String: NSImage] = [:]
+    @Published private(set) var seriesThumbnailStates: [String: SeriesThumbnailState] = [:]
+    private struct ThumbnailRequest {
+        let id: UUID
+        let representativeURL: URL
+    }
+    private var thumbnailRequests: [String: ThumbnailRequest] = [:]
+    private var thumbnailOperations: [String: Operation] = [:]
+    private let thumbnailRenderer: (DicomImageContext) -> NSImage?
     private let thumbnailQueue: OperationQueue = {
         let q = OperationQueue()
         q.maxConcurrentOperationCount = 2
@@ -342,7 +355,11 @@ class DICOMModel: ObservableObject {
     private var flagsMonitor: Any?
 
     // MARK: - Initialization
-    init() {
+    init(recentHistory: RecentOpenHistory = RecentOpenHistory(), recordsSystemRecentDocuments: Bool = true,
+         thumbnailRenderer: @escaping (DicomImageContext) -> NSImage? = { DICOMThumbnailRenderer.render($0) }) {
+        self.thumbnailRenderer = thumbnailRenderer
+        self.recentHistory = recentHistory
+        self.recordsSystemRecentDocuments = recordsSystemRecentDocuments
         let firstPanel = PanelState()
         self.panels = [firstPanel]
         self.activePanelID = firstPanel.id
@@ -365,6 +382,8 @@ class DICOMModel: ObservableObject {
     }
 
     deinit {
+        scanQueue.cancelAllOperations()
+        for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
         if let monitor = flagsMonitor {
             NSEvent.removeMonitor(monitor)
         }
@@ -410,343 +429,164 @@ class DICOMModel: ObservableObject {
         return imageCache.object(forKey: url as NSURL)
     }
     
-    // Asynchronous Series Thumbnail
-    func requestSeriesThumbnail(for series: DicomSeries) {
-        if seriesThumbnails[series.id] != nil { return }
-        // Pick middle image
-        guard !series.images.isEmpty else { return }
-        let midIndex = series.images.count / 2
-        let url = series.images[midIndex].url
-        
-        thumbnailQueue.addOperation { [weak self] in
-            guard let self = self else { return }
-            if self.seriesThumbnails[series.id] != nil { return }
+    /// Request once per representative image. During a scan, keep the first
+    /// provisional result and refresh its middle slice once at scan completion.
+    /// This bounds background decoding even for folders with thousands of files.
+    func requestSeriesThumbnail(for series: DicomSeries, retry: Bool = false) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.requestSeriesThumbnail(for: series, retry: retry) }
+            return
+        }
+        guard let currentSeries = allSeries.first(where: { $0.id == series.id }),
+              !currentSeries.images.isEmpty else { return }
+        let representative = currentSeries.images[currentSeries.images.count / 2]
+        if !retry {
+            if isScanning, seriesThumbnailStates[series.id] != nil { return }
+            if thumbnailRequests[series.id]?.representativeURL == representative.url,
+               seriesThumbnailStates[series.id] != nil { return }
+        }
 
-            // Multi-frame: extract first frame thumbnail with minimal I/O
-            let selectedImage = series.images[series.images.count / 2]
-            if selectedImage.numberOfFrames > 1 {
-                // Read only the first 2MB to find the first JPEG frame
-                // without memory-mapping the entire multi-GB file
-                if let fh = try? FileHandle(forReadingFrom: selectedImage.url) {
-                    let headerData = fh.readData(ofLength: 2 * 1024 * 1024)
-                    fh.closeFile()
-
-                    // Find first encapsulated JPEG frame: search for Item tag (FFFE,E000)
-                    // after PixelData tag (7FE0,0010)
-                    headerData.withUnsafeBytes { raw in
-                        guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-                        let count = headerData.count
-                        // Find PixelData tag
-                        var pdOffset = -1
-                        for i in 132..<(count - 12) {
-                            if base[i] == 0xE0 && base[i+1] == 0x7F && base[i+2] == 0x10 && base[i+3] == 0x00 {
-                                pdOffset = i
-                                break
-                            }
-                        }
-                        guard pdOffset >= 0 else { return }
-
-                        // Skip VR + length to reach items
-                        var pos = pdOffset + 4
-                        if pos + 2 <= count && base[pos] == 0x4F && (base[pos+1] == 0x42 || base[pos+1] == 0x57) {
-                            pos += 8  // Explicit VR OB/OW
-                        } else {
-                            pos += 4  // Implicit VR
-                        }
-
-                        // Skip Basic Offset Table (first item)
-                        if pos + 8 <= count && base[pos] == 0xFE && base[pos+1] == 0xFF && base[pos+2] == 0x00 && base[pos+3] == 0xE0 {
-                            let botLen = Int(base[pos+4]) | (Int(base[pos+5]) << 8) | (Int(base[pos+6]) << 16) | (Int(base[pos+7]) << 24)
-                            pos = pos + 8 + botLen
-                        }
-
-                        // Read first actual frame item
-                        if pos + 8 <= count && base[pos] == 0xFE && base[pos+1] == 0xFF && base[pos+2] == 0x00 && base[pos+3] == 0xE0 {
-                            let frameLen = Int(base[pos+4]) | (Int(base[pos+5]) << 8) | (Int(base[pos+6]) << 16) | (Int(base[pos+7]) << 24)
-                            let frameStart = pos + 8
-                            if frameStart + frameLen <= count {
-                                let jpegData = headerData[frameStart..<(frameStart + frameLen)]
-                                if let thumb = NSImage(data: jpegData) {
-                                    DispatchQueue.main.async {
-                                        self.seriesThumbnails[series.id] = thumb
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                return
-            }
-
-            do {
-                // Parse Header & Data for this specific file
-                let data = try Data(contentsOf: url)
-                let parser = SimpleDicomParser(data: data)
-                let (elements, pixelData, syntax) = try parser.parse()
-                guard let pd = pixelData else { return }
-
-                // Extract tags needed for rendering
-                func getInt(_ g: UInt16, _ e: UInt16) -> Int? { 
-                    return elements.first(where: { $0.tag == DicomTag(group: g, element: e) })?.intValue ?? 
-                           Int(elements.first(where: { $0.tag == DicomTag(group: g, element: e) })?.stringValue ?? "")
-                }
-                
-                let w = getInt(0x0028, 0x0011) ?? 512
-                let h = getInt(0x0028, 0x0010) ?? 512
-                let bits = getInt(0x0028, 0x0100) ?? 8 
-                let samples = getInt(0x0028, 0x0002) ?? 1
-                let signed = (getInt(0x0028, 0x0103) ?? 0) == 1
-                let photo = elements.first(where: { $0.tag == DicomTag(group: 0x0028, element: 0x0004) })?.stringValue ?? "MONOCHROME2"
-                
-                // Compression Check: compares File Size vs Expected Raw Size OR Transfer Syntax OR Encapsulation
-                let bytesPerPixel = (bits > 8 ? 2 : 1) * samples
-                let expectedSize = w * h * bytesPerPixel
-                // 1. Check Explicit UID (JPEG families start with 1.2.840.10008.1.2.4)
-                let isCompressedUID = syntax?.contains("1.2.840.10008.1.2.4") ?? false
-                // 2. Check Size Mismatch (Backup heuristic)
-                let isSizeCompressed = (Double(pd.count) < Double(expectedSize) * 0.95)
-                // 3. Check for Encapsulation Item Tag (FFFE,E000) -> LE: FE FF 00 E0
-                // If present at start, it is definitely encapsulated (compressed)
-                let startsWithItemTag = pd.count > 4 && pd[0] == 0xFE && pd[1] == 0xFF && pd[2] == 0x00 && pd[3] == 0xE0
-                
-                let isCompressed = isCompressedUID || isSizeCompressed || startsWithItemTag
-
-                if isCompressed {
-                    // Attempt native decode (JPEG/JPEG-LS/JPEG2000 embedded in DICOM)
-                    // Encapsulated data usually starts with an Item Tag, then invalid bytes, then the image.
-                    // We must find the Start of Image (SOI) marker.
-                    
-                    var compressedData: Data? = nil
-                    let searchLimit = min(pd.count, 65536) // Search first 64KB (sufficient for Offset Table)
-                    
-                    // 1. JPEG / JPEG-LS (FF D8)
-                    if let start = pd.range(of: Data([0xFF, 0xD8]), options: [], in: 0..<searchLimit) {
-                        compressedData = pd.subdata(in: start.lowerBound..<pd.count)
-                    } 
-                    // 2. JPEG 2000 (FF 4F FF 51)
-                    else if let start = pd.range(of: Data([0xFF, 0x4F, 0xFF, 0x51]), options: [], in: 0..<searchLimit) {
-                        compressedData = pd.subdata(in: start.lowerBound..<pd.count)
-                    }
-                    else {
-                        // 3. Last Resort: Try the whole blob (e.g. RLE or other formats)
-                        compressedData = pd
-                    }
-                    
-                    if let cData = compressedData, let rawImg = NSImage(data: cData) {
-                         // Apply Auto-Leveling to raw compressed image
-                         // Because typically these are raw captures (dark)
-                         let leveledImg = self.autoLevelImage(rawImg) ?? rawImg
-                         
-                         DispatchQueue.main.async {
-                             self.seriesThumbnails[series.id] = leveledImg
-                         }
-                         return
-                    } else {
-                        if let img = DCMTKHelper.convertDICOM(toNSImage: url.path) {
-                             let leveledImg = self.autoLevelImage(img) ?? img
-                             DispatchQueue.main.async {
-                                 self.seriesThumbnails[series.id] = leveledImg
-                             }
-                        }
-                        return
-                    }
-                }
-                
-                // Raw Render PATH
-                
-                // Auto W/L
-                let (minVal, maxVal) = self.computeMinMax(data: pd, isSigned: signed, bits: bits)
-                var ww = maxVal - minVal
-                if ww == 0 { ww = 1 }
-                let wc = minVal + (ww / 2.0)
-                let winBottom = wc - (ww / 2.0)
-                
-                // Render (Stateless Logic)
-                let totalPixels = w * h
-
-                // Use CFMutableData so the backing store is retained by CGDataProvider,
-                // preventing dangling-pointer reads when the CGImage outlives this scope.
-                guard let cfData = CFDataCreateMutable(nil, totalPixels) else { return }
-                CFDataSetLength(cfData, totalPixels)
-                let bufferPtr = CFDataGetMutableBytePtr(cfData)!
-
-                if bits > 8 {
-                     pd.withUnsafeBytes { raw in
-                         if let ptr = raw.baseAddress?.assumingMemoryBound(to: UInt16.self) {
-                             let count = min(totalPixels, pd.count/2)
-                             for i in 0..<count {
-                                 var val: Double = 0
-                                 if signed { val = Double(Int16(bitPattern: ptr[i])) }
-                                 else { val = Double(ptr[i]) }
-
-                                 var norm = (val - winBottom) / ww
-                                 if norm < 0 { norm = 0 }
-                                 if norm > 1 { norm = 1 }
-                                 if photo == "MONOCHROME1" { norm = 1.0 - norm }
-                                 bufferPtr[i] = UInt8(norm * 255.0)
-                             }
-                         }
-                     }
+        thumbnailOperations[series.id]?.cancel()
+        let request = ThumbnailRequest(id: UUID(), representativeURL: representative.url)
+        thumbnailRequests[series.id] = request
+        // Keep a provisional preview visible while its final representative is
+        // rendered. Cross-session reset removes all previous thumbnails.
+        seriesThumbnailStates[series.id] = .loading
+        let sessionID = currentLoadRequestID
+        let renderer = thumbnailRenderer
+        let operation = BlockOperation()
+        operation.addExecutionBlock { [weak self, weak operation] in
+            guard let operation, !operation.isCancelled else { return }
+            let thumbnail = autoreleasepool { renderer(representative) }
+            guard !operation.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, self.currentLoadRequestID == sessionID,
+                      self.thumbnailRequests[series.id]?.id == request.id,
+                      !operation.isCancelled else { return }
+                self.thumbnailOperations.removeValue(forKey: series.id)
+                if let thumbnail {
+                    self.seriesThumbnails[series.id] = thumbnail
+                    self.seriesThumbnailStates[series.id] = .ready
                 } else {
-                     pd.withUnsafeBytes { raw in
-                         if let ptr = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) {
-                             let count = min(totalPixels, pd.count)
-                             for i in 0..<count {
-                                 let val = Double(ptr[i])
-                                 var norm = (val - winBottom) / ww
-                                 if norm < 0 { norm = 0 }
-                                 if norm > 1 { norm = 1 }
-                                 if photo == "MONOCHROME1" { norm = 1.0 - norm }
-                                 bufferPtr[i] = UInt8(norm * 255.0)
-                             }
-                         }
-                     }
+                    self.seriesThumbnailStates[series.id] = .failed
                 }
-
-                let colorSpace = CGColorSpaceCreateDeviceGray()
-                if let provider = CGDataProvider(data: cfData),
-                   let cg = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 8,
-                                    bytesPerRow: w, space: colorSpace,
-                                    bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-                                    provider: provider, decode: nil, shouldInterpolate: false,
-                                    intent: .defaultIntent) {
-                    let rawImg = NSImage(cgImage: cg, size: NSSize(width: Double(w), height: Double(h)))
-                    // Apply Auto-Leveling to raw render as well (handles outliers/padding)
-                    let leveledImg = self.autoLevelImage(rawImg) ?? rawImg
-
-                    DispatchQueue.main.async {
-                        self.seriesThumbnails[series.id] = leveledImg
-                    }
-                }
-            } catch {
-                // Thumbnail generation failed — skip silently
             }
         }
+        thumbnailOperations[series.id] = operation
+        thumbnailQueue.addOperation(operation)
     }
-    
-    // Legacy generatePythonThumbnail removed
 
-
-    // Helper: Auto-Level an NSImage (Contrast Stretch)
-    private func autoLevelImage(_ input: NSImage) -> NSImage? {
-        guard let cgImg = input.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        
-        let width = cgImg.width
-        let height = cgImg.height
-        let colorSpace = CGColorSpaceCreateDeviceGray()
-        
-        // Draw into 8-bit grayscale context to standardize
-        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width, space: colorSpace, bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
-        
-        ctx.draw(cgImg, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        guard let dataPtr = ctx.data else { return nil }
-        let totalBytes = width * height
-        let buffer = dataPtr.bindMemory(to: UInt8.self, capacity: totalBytes)
-        
-        // 1. Find Min/Max
-        var minVal: UInt8 = 255
-        var maxVal: UInt8 = 0
-        
-        // Optimization: Sample stride if huge? For thumbnail, full scan is fast enough (512x512 = 256k items)
-        for i in 0..<totalBytes {
-            let val = buffer[i]
-            if val < minVal { minVal = val }
-            if val > maxVal { maxVal = val }
-        }
-        
-        // If contrast is already maxed or flat, return original
-        if minVal == 0 && maxVal == 255 { return input }
-        if minVal == maxVal { return input } // Flat image
-        
-        // 2. Apply Stretch
-        // NewVal = (OldVal - Min) * 255 / (Max - Min)
-        let range = Double(maxVal - minVal)
-        
-        for i in 0..<totalBytes {
-            let oldVal = Double(buffer[i])
-            var norm = (oldVal - Double(minVal)) / range
-            if norm < 0 { norm = 0 }
-            if norm > 1 { norm = 1 }
-            buffer[i] = UInt8(norm * 255.0)
-        }
-        
-        // 3. Create Image
-        if let newCG = ctx.makeImage() {
-            return NSImage(cgImage: newCG, size: input.size)
-        }
-        return nil
-    }
-    
     // MARK: - Load Methods
 
-    /// Show an Open panel and load the selected DICOM file or folder.
+    /// Show an Open panel and load the selected DICOM files or folders together.
     func openFolder() {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [
-            .init(filenameExtension: "dcm")!,
-            .folder
-        ]
-        if panel.runModal() == .OK, let url = panel.url {
-            load(url: url)
+        // DICOM files do not always have an extension.
+        if panel.runModal() == .OK {
+            load(urls: panel.urls)
         }
     }
 
     func load(url: URL) {
-        let secured = url.startAccessingSecurityScopedResource()
-        defer { if secured { url.stopAccessingSecurityScopedResource() } }
-
-        BenchmarkLogger.shared.start("load_total")
-        BenchmarkLogger.shared.log(event: "load_start", dataset: url.lastPathComponent, detail: url.path)
-
-        // Cancel any pending background work
-        cachingQueue.cancelAllOperations()
-        
-        DispatchQueue.main.async {
-            // Reset State completely
-            self.errorMessage = nil
-            self.isLoading = true
-            self.image = nil
-            self.rawPixelData = nil
-            self.allSeries = []
-            self.derivedObjects = []
-            self.annotationObjects = []
-            self.selectedDerivedObjectID = nil
-            self.panels.forEach { $0.importedOverlays = [] }
-            self.currentSeriesIndex = -1
-            self.currentImageIndex = -1
-            self.tags = []
-            self.currentSeriesInfo = ""
-            self.currentImageInfo = ""
-            self.resetAllPanels()
-
-            var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
-                if isDirectory.boolValue {
-                    // Directory: Background scan
-                    self.isScanning = true
-                    self.scanDirectory(url)
-                } else {
-                    // File: Load immediately, then scan parent for context
-                    self.loadSingleFile(url)
-                    let parent = url.deletingLastPathComponent()
-                    self.isScanning = true
-                    self.scanDirectory(parent, selecting: url)
-                }
-            } else {
-                 self.errorMessage = "File not accessible or does not exist."
-                 self.isLoading = false
-             }
-        }
+        load(urls: [url])
     }
 
+    /// Open one batch in this viewer. Explicit files are inspected first so an
+    /// opened slice stays selected while its surrounding folders are indexed.
+    func load(urls: [URL]) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.load(urls: urls) }
+            return
+        }
+        var seen: Set<URL> = []
+        let requestedURLs = urls.filter(\.isFileURL).map { $0.standardizedFileURL }
+            .filter { seen.insert($0).inserted }
+        guard !requestedURLs.isEmpty else { return }
 
+        currentLoadRequestID = UUID()
+        let requestID = currentLoadRequestID
+        legacyImageRequestID = UUID()
+        panelImageRequestIDs.removeAll()
+        scanQueue.cancelAllOperations()
+        loadingQueue.cancelAllOperations()
+        cachingQueue.cancelAllOperations()
+        precachingQueue.cancelAllOperations()
+        thumbnailQueue.cancelAllOperations()
+        volumeBuildQueue.cancelAllOperations()
+        for panel in panels { stopCinePlayback(panel) }
+        for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
+        accessedURLs = []
+        for url in requestedURLs where url.startAccessingSecurityScopedResource() {
+            accessedURLs.append(url)
+        }
+
+        var explicitFiles: [URL] = []
+        var roots: [URL] = []
+        var accessibleURLs: [URL] = []
+        for url in requestedURLs {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
+            accessibleURLs.append(url)
+            if isDirectory.boolValue {
+                roots.append(url)
+            } else {
+                explicitFiles.append(url)
+                roots.append(url.deletingLastPathComponent())
+            }
+        }
+        // A parent scan already includes any selected descendants. Comparing
+        // path components avoids treating similarly prefixed sibling names as
+        // overlapping directories.
+        let uniqueRoots = Array(Set(roots)).sorted { $0.path < $1.path }
+        roots = uniqueRoots.filter { candidate in
+            !uniqueRoots.contains { parent in
+                parent != candidate && candidate.pathComponents.starts(with: parent.pathComponents)
+            }
+        }
+        for root in roots where !accessedURLs.contains(root) && root.startAccessingSecurityScopedResource() {
+            accessedURLs.append(root)
+        }
+
+        errorMessage = nil
+        isLoading = !accessibleURLs.isEmpty
+        isScanning = !accessibleURLs.isEmpty
+        image = nil
+        rawPixelData = nil
+        dcmtkImage = nil
+        allSeries = []
+        derivedObjects = []
+        annotationObjects = []
+        selectedDerivedObjectID = nil
+        currentSeriesIndex = -1
+        currentImageIndex = -1
+        tags = []
+        currentSeriesInfo = ""
+        currentImageInfo = ""
+        lastPrecachedSeriesIndex = -1
+        resetAllPanels()
+
+        guard !accessibleURLs.isEmpty else {
+            errorMessage = "File not accessible or does not exist."
+            activePanel?.errorMessage = errorMessage
+            return
+        }
+        BenchmarkLogger.shared.start("load_total")
+        BenchmarkLogger.shared.log(event: "load_start", dataset: accessibleURLs[0].lastPathComponent,
+                                   detail: "Opening \(accessibleURLs.count) item(s)")
+        scanDirectories(roots, explicitFiles: explicitFiles, requestedURLs: accessibleURLs, requestID: requestID)
+    }
 
     // MARK: - Image Loading
     func loadSingleFile(_ url: URL) {
+        let imageRequestID = UUID()
+        legacyImageRequestID = imageRequestID
+        let sessionID = currentLoadRequestID
+        let requestedPanelID = activePanelID
+        panelImageRequestIDs[requestedPanelID] = imageRequestID
+        loadingQueue.cancelAllOperations()
         // Guard: route multi-frame files through MultiFrameDecoder, never DCMTK
         if currentSeriesIndex >= 0 && currentSeriesIndex < allSeries.count {
             let images = allSeries[currentSeriesIndex].images
@@ -778,16 +618,15 @@ class DICOMModel: ObservableObject {
 
         // Snapshot seriesStates on the main thread to avoid DispatchQueue.main.sync deadlock in the background block
         let capturedSeriesStates = self.seriesStates
+        let capturedSeriesUID = allSeries[safe: currentSeriesIndex]?.id
+        if currentSeriesIndex != lastPrecachedSeriesIndex {
+            lastPrecachedSeriesIndex = currentSeriesIndex
+            precacheCurrentSeries()
+        }
 
         let op = BlockOperation()
         op.addExecutionBlock { [weak self, weak op] in
             guard let self = self, let op = op, !op.isCancelled else { return }
-            
-            // Trigger Pre-caching if new series
-            if self.currentSeriesIndex != self.lastPrecachedSeriesIndex {
-                self.lastPrecachedSeriesIndex = self.currentSeriesIndex
-                self.precacheCurrentSeries()
-            }
             
             // 1. Check Cache
             // Determine Target W/L (Persistent State)
@@ -802,8 +641,7 @@ class DICOMModel: ObservableObject {
             // But we can't know the SeriesUID of the file without parsing it or having it passed.
             // Optimization: If we are navigating the CURRENT series, we know the UID.
             
-            if self.currentSeriesIndex >= 0 && self.currentSeriesIndex < self.allSeries.count {
-                let currentSeriesUID = self.allSeries[self.currentSeriesIndex].id
+            if let currentSeriesUID = capturedSeriesUID {
                 if let state = capturedSeriesStates[currentSeriesUID] {
                     if let sw = state.windowWidth, let sc = state.windowCenter {
                          targetWW = sw
@@ -839,6 +677,10 @@ class DICOMModel: ObservableObject {
                     if let dcmtk = cachedDCMTK {
                         // Full Hit & W/L Match
                         DispatchQueue.main.async {
+                            guard self.currentLoadRequestID == sessionID,
+                                  self.legacyImageRequestID == imageRequestID,
+                                  self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                                  self.activePanelID == requestedPanelID else { return }
                             self.image = cachedImage
                             self.rawPixelData = cachedRaw
                             self.dcmtkImage = dcmtk
@@ -850,6 +692,10 @@ class DICOMModel: ObservableObject {
                         // Partial Hit (Image OK, DCMTK missing)
                         // If W/L matches, show image, but reload DCMTK
                         DispatchQueue.main.async {
+                            guard self.currentLoadRequestID == sessionID,
+                                  self.legacyImageRequestID == imageRequestID,
+                                  self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                                  self.activePanelID == requestedPanelID else { return }
                             self.image = cachedImage
                         }
                     }
@@ -859,6 +705,10 @@ class DICOMModel: ObservableObject {
                      if let dcmObj = cachedDCMTK {
                          if let newImg = dcmObj.renderImage(withWidth: 0, height: 0, ww: targetWW, wc: targetWC) {
                              DispatchQueue.main.async {
+                                 guard self.currentLoadRequestID == sessionID,
+                                       self.legacyImageRequestID == imageRequestID,
+                                       self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                                       self.activePanelID == requestedPanelID else { return }
                                  self.image = newImg
                                  self.rawPixelData = cachedRaw
                                  self.dcmtkImage = dcmObj
@@ -890,6 +740,10 @@ class DICOMModel: ObservableObject {
                 }
                 
                 DispatchQueue.main.async {
+                    guard self.currentLoadRequestID == sessionID,
+                          self.legacyImageRequestID == imageRequestID,
+                          self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                          self.activePanelID == requestedPanelID else { return }
                     self.tags = elements
                 }
             } catch {
@@ -909,6 +763,10 @@ class DICOMModel: ObservableObject {
                 
                 guard let rawData = dcmObj.getRawDataWidth(&width, height: &height, bitDepth: &depth, samples: &samples, isSigned: &isSigned) else {
                      DispatchQueue.main.async {
+                         guard self.currentLoadRequestID == sessionID,
+                               self.legacyImageRequestID == imageRequestID,
+                               self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                               self.activePanelID == requestedPanelID else { return }
                          self.errorMessage = "Failed to get raw data"
                          self.isLoading = false
                      }
@@ -949,6 +807,10 @@ class DICOMModel: ObservableObject {
                     self.rawDataCache.setObject(rawData as NSData, forKey: url as NSURL)
 
                     DispatchQueue.main.async {
+                        guard self.currentLoadRequestID == sessionID,
+                              self.legacyImageRequestID == imageRequestID,
+                              self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                              self.activePanelID == requestedPanelID else { return }
                         self.dcmtkImage = dcmObj
                         self.image = nsImage
                         self.rawPixelData = rawData
@@ -976,6 +838,10 @@ class DICOMModel: ObservableObject {
                     }
                 } else {
                     DispatchQueue.main.async {
+                        guard self.currentLoadRequestID == sessionID,
+                              self.legacyImageRequestID == imageRequestID,
+                              self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                              self.activePanelID == requestedPanelID else { return }
                         self.errorMessage = "Failed to render image"
                         self.isLoading = false
                     }
@@ -1004,6 +870,10 @@ class DICOMModel: ObservableObject {
                     self.rawDataCache.setObject(j2kData as NSData, forKey: url as NSURL)
 
                     DispatchQueue.main.async {
+                        guard self.currentLoadRequestID == sessionID,
+                              self.legacyImageRequestID == imageRequestID,
+                              self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                              self.activePanelID == requestedPanelID else { return }
                         self.rawPixelData = j2kData
                         self.imageWidth = j2kWidth
                         self.imageHeight = j2kHeight
@@ -1046,6 +916,10 @@ class DICOMModel: ObservableObject {
                         self.imageCacheParamsLock.unlock()
 
                         DispatchQueue.main.async {
+                            guard self.currentLoadRequestID == sessionID,
+                                  self.legacyImageRequestID == imageRequestID,
+                                  self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                                  self.activePanelID == requestedPanelID else { return }
                             self.dcmtkImage = nil
                             self.rawPixelData = rawData
                             self.imageWidth = rawW
@@ -1074,6 +948,10 @@ class DICOMModel: ObservableObject {
                         // All three decode paths failed
                         let errorDetail = DCMTKHelper.lastError(forPath: url.path) ?? "Unknown error"
                         DispatchQueue.main.async {
+                            guard self.currentLoadRequestID == sessionID,
+                                  self.legacyImageRequestID == imageRequestID,
+                                  self.panelImageRequestIDs[requestedPanelID] == imageRequestID,
+                                  self.activePanelID == requestedPanelID else { return }
                             self.errorMessage = "Failed to load image: \(errorDetail)"
                             self.isLoading = false
                         }
@@ -1321,6 +1199,12 @@ class DICOMModel: ObservableObject {
     }
 
     private func computeHistogram(data: Data, isSigned: Bool, bits: Int) {
+        guard samples == 1 else {
+            histogramData = []
+            return
+        }
+        let sessionID = currentLoadRequestID
+        let imageRequestID = legacyImageRequestID
         // Run on background
         DispatchQueue.global(qos: .userInitiated).async {
             var bins = [Int](repeating: 0, count: 256)
@@ -1411,6 +1295,8 @@ class DICOMModel: ObservableObject {
             let normalized = maxLog > 0 ? logBins.map { $0 / maxLog } : logBins
 
             DispatchQueue.main.async {
+                guard self.currentLoadRequestID == sessionID,
+                      self.legacyImageRequestID == imageRequestID else { return }
                 self.histogramData = normalized
                 self.minPixelValue = minVal
                 self.maxPixelValue = maxVal
@@ -1586,6 +1472,8 @@ class DICOMModel: ObservableObject {
     private func renderImage(width: Int, height: Int, pixelData: Data, ww: Double, wc: Double,
                              bits: Int, spp: Int, signed: Bool, mono1: Bool) -> NSImage? {
         guard width > 0, height > 0 else { return nil }
+        let bytesPerSample = bits > 16 ? 4 : bits > 8 ? 2 : 1
+        guard pixelData.count >= width * height * max(1, spp) * bytesPerSample else { return nil }
 
         // Handle RGB Protocol
         if spp == 3 {
@@ -1874,219 +1762,171 @@ class DICOMModel: ObservableObject {
 
 
     // MARK: - Directory
-    private func scanDirectory(_ url: URL, selecting targetUrl: URL? = nil) {
+    private func scanDirectories(_ roots: [URL], explicitFiles: [URL], requestedURLs: [URL], requestID: UUID) {
         BenchmarkLogger.shared.start("scan_directory")
-        let benchDataset = url.lastPathComponent
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            let fileManager = FileManager.default
-            guard let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { return }
+        let benchDataset = requestedURLs[0].lastPathComponent
+        let operation = BlockOperation()
+        operation.addExecutionBlock { [weak self, weak operation] in
+            guard let self, let operation, !operation.isCancelled else { return }
             var contexts: [DicomImageContext] = []
             var derivedObjects: [DICOMDerivedObjectSummary] = []
             var annotationObjects: [DICOMAnnotationObject] = []
-            
-            // Helper to update UI safely
+            var visited: Set<URL> = []
+            var publishedFirstResult = false
+            var hasRecordedHistory = false
+
             func updateUI(isFinal: Bool) {
-                // Group & Sort (Heavy work on BG thread)
-                let grouped = Dictionary(grouping: contexts, by: { $0.seriesGroupingKey })
-                var seriesList: [DicomSeries] = []
-                for (key, images) in grouped {
-                    var sortedImages = images
-                    let zLocations = images.compactMap { $0.zLocation }
-                    let uniqueZ = Set(zLocations).count
-                    let instanceNumbers = images.map { $0.instanceNumber }
-                    let uniqueInst = Set(instanceNumbers).count
-
-                    // Priority 1: Instance Number (Logical Sequence)
-                    if uniqueInst > 1 {
-                         sortedImages.sort { $0.instanceNumber < $1.instanceNumber }
+                guard !operation.isCancelled else { return }
+                let grouped = Dictionary(grouping: contexts, by: \.seriesGroupingKey)
+                let seriesList = grouped.map { key, images -> DicomSeries in
+                    let useInstance = Set(images.map(\.instanceNumber)).count > 1
+                    let useLocation = !useInstance && Set(images.compactMap(\.zLocation)).count > 1
+                    let sorted = images.sorted {
+                        if useInstance && $0.instanceNumber != $1.instanceNumber {
+                            return $0.instanceNumber < $1.instanceNumber
+                        }
+                        if useLocation && $0.zLocation != $1.zLocation {
+                            return ($0.zLocation ?? 0) < ($1.zLocation ?? 0)
+                        }
+                        return $0.url.path < $1.url.path
                     }
-                    // Priority 2: Z-Location (Spatial Sequence)
-                    else if uniqueZ > 1 {
-                        sortedImages.sort { ($0.zLocation ?? 0) < ($1.zLocation ?? 0) }
-                    } else {
-                        sortedImages.sort { $0.instanceNumber < $1.instanceNumber }
-                    }
-
-                    let first = sortedImages.first
-                    let sNum = first?.seriesNumber ?? 0
-                    let baseDesc = first?.seriesDescription ?? "No Description"
-                    let sDesc = first?.displaySeriesDescription(baseDescription: baseDesc) ?? baseDesc
-                    seriesList.append(DicomSeries(id: key, seriesNumber: sNum, seriesDescription: sDesc, images: sortedImages))
-                }
-                seriesList.sort {
+                    let first = sorted[0]
+                    return DicomSeries(id: key, seriesNumber: first.seriesNumber,
+                                       seriesDescription: first.displaySeriesDescription(baseDescription: first.seriesDescription),
+                                       images: sorted)
+                }.sorted {
                     if $0.seriesNumber != $1.seriesNumber { return $0.seriesNumber < $1.seriesNumber }
                     return $0.id < $1.id
                 }
-                
+                // Freeze snapshots before enqueueing; the scanner keeps mutating
+                // its accumulation arrays while the main queue handles this one.
+                let derivedSnapshot = derivedObjects.sorted {
+                    if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+                    return $0.displayTitle < $1.displayTitle
+                }
+                let annotationSnapshot = annotationObjects
+                let shouldRecordHistory = !hasRecordedHistory && (!seriesList.isEmpty || !derivedSnapshot.isEmpty)
+                if shouldRecordHistory { hasRecordedHistory = true }
                 DispatchQueue.main.async {
-                    // Capture current selection UID before replacing list
-                    let currentUID = (self.currentSeriesIndex >= 0 && self.currentSeriesIndex < self.allSeries.count) ? self.allSeries[self.currentSeriesIndex].id : nil
-                    let currentImgURL = (self.currentSeriesIndex >= 0 && self.currentSeriesIndex < self.allSeries.count && self.currentImageIndex >= 0 && self.currentImageIndex < self.allSeries[self.currentSeriesIndex].images.count) ? self.allSeries[self.currentSeriesIndex].images[self.currentImageIndex].url : nil
-                    
-                    self.allSeries = seriesList
-                    self.derivedObjects = derivedObjects.sorted {
-                        if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
-                        return $0.displayTitle < $1.displayTitle
-                    }
-                    self.annotationObjects = annotationObjects
-                    self.refreshImportedOverlaysForAllPanels()
-                    if isFinal,
-                       CommandLine.arguments.contains("--select-first-derived"),
-                       self.selectedDerivedObjectID == nil,
-                       let firstDerivedObject = self.derivedObjects.first {
-                        self.selectedDerivedObjectID = firstDerivedObject.id
-                        self.tags = firstDerivedObject.tags
-                        self.showTags = true
-                        self.refreshImportedOverlaysForAllPanels()
-                    }
-
-                    if isFinal { self.isScanning = false }
-                    
-                    // Restore Selection or Initialize
-                    if let uid = currentUID, let newParams = seriesList.enumerated().first(where: { $0.element.id == uid }) {
-                        self.currentSeriesIndex = newParams.offset
-                        
-                        // Decision: Stick to Start (Index 0) OR Track File?
-                        // If user opened folder (no target) and is at start, keep them at start as list fills.
-                        // This fixes the issue where Fast Load shows a random file (Index 0) and we get stuck with it mid-series.
-                        if targetUrl == nil && self.currentImageIndex == 0 {
-                            self.currentImageIndex = 0
-                            // Force reload of new first image content
-                             if let first = self.allSeries[self.currentSeriesIndex].images.first {
-                                 // Only reload if url changed to avoid redundant processing
-                                 if first.url != currentImgURL {
-                                     if let panel = self.activePanel {
-                                         self.loadFileForPanel(panel, imageContext: first)
-                                     } else {
-                                         self.loadSingleFile(first.url)
-                                     }
-                                 }
-                             }
-                        } else {
-                            // Restore Image Selection within the series (Track File)
-                            if let imgURL = currentImgURL {
-                                 let images = self.allSeries[self.currentSeriesIndex].images
-                                 if let imgIdx = images.firstIndex(where: { $0.url == imgURL }) {
-                                     self.currentImageIndex = imgIdx
-                                 }
-                            }
+                    guard self.currentLoadRequestID == requestID, !operation.isCancelled else { return }
+                    self.applyScanSnapshot(seriesList, derivedObjects: derivedSnapshot,
+                                           annotationObjects: annotationSnapshot, explicitFiles: explicitFiles,
+                                           isFinal: isFinal)
+                    if shouldRecordHistory {
+                        self.recentHistory.record(urls: requestedURLs)
+                        if self.recordsSystemRecentDocuments {
+                            for url in requestedURLs { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
                         }
-                    }
-                    else if self.currentSeriesIndex == -1 && !self.allSeries.isEmpty {
-                        // Robust First Load Selection
-                         var found = false
-                         if let target = targetUrl {
-                             let targetPath = target.path
-                             // Search for exact file match (using path string to avoid URL discrepancies)
-                             for (sIdx, series) in self.allSeries.enumerated() {
-                                 if let imgIdx = series.images.firstIndex(where: { $0.url.path == targetPath }) {
-                                     self.currentSeriesIndex = sIdx
-                                     self.currentImageIndex = imgIdx
-                                     found = true
-                                     break
-                                 }
-                             }
-                         }
-                         
-                         // Fallback: Default to First Series, First Image
-                         if !found {
-                             self.currentSeriesIndex = 0
-                             self.currentImageIndex = 0
-                             // Trigger load for the very first image found
-                             if let first = self.allSeries.first?.images.first {
-                                 if let panel = self.activePanel {
-                                     self.assignSeriesToPanel(panel, seriesIndex: 0)
-                                 } else {
-                                     self.loadSingleFile(first.url)
-                                 }
-                             }
-                         }
-                    } else if self.allSeries.isEmpty && self.derivedObjects.isEmpty && isFinal {
-                        self.errorMessage = "No DICOM series found."
-                        self.isLoading = false
                     }
                 }
             }
 
-            // Process
-            var firstFound = false
-            var counter = 0
-            
-            for case let fileURL as URL in enumerator {
-                // Check directory
-                if let resources = try? fileURL.resourceValues(forKeys: [.isDirectoryKey]), resources.isDirectory == true { continue }
-                
-                // Skip DICOMDIR files (directory index, not images)
-                if fileURL.lastPathComponent.uppercased() == "DICOMDIR" { continue }
-
-                // Check Extension
-                let ext = fileURL.pathExtension.lowercased()
-                if ext != "dcm" && ext != "" { continue }
-                
-                // Process File
-                if let context = self.quickParse(fileURL) { 
-                    contexts.append(context) 
-                    
-                    // FAST LOAD: First Image
-                    if !firstFound && targetUrl == nil {
-                        firstFound = true
-                        BenchmarkLogger.shared.stop("first_image_found", dataset: benchDataset, detail: "First DICOM file parsed")
-                        BenchmarkLogger.shared.start("first_image_display")
-                        DispatchQueue.main.async {
-                            // Only set if we are still empty (avoid race conditions)
-                            if self.allSeries.isEmpty {
-                                let tempDesc = context.displaySeriesDescription(baseDescription: context.seriesDescription)
-                                let tempSeries = DicomSeries(
-                                    id: context.seriesGroupingKey,
-                                    seriesNumber: context.seriesNumber,
-                                    seriesDescription: tempDesc,
-                                    images: [context]
-                                )
-                                self.allSeries = [tempSeries]
-                                self.currentSeriesIndex = 0
-                                self.currentImageIndex = 0 // Explicitly set 0
-                                // Use the panel-specific loading path (not the legacy loadSingleFile)
-                                // to avoid race conditions with scan-time updateUI re-loads
-                                if let panel = self.activePanel {
-                                    self.assignSeriesToPanel(panel, seriesIndex: 0)
-                                } else {
-                                    self.loadSingleFile(context.url)
-                                }
-                            }
-                        }
+            func process(_ inputURL: URL, explicit: Bool = false) {
+                guard !operation.isCancelled else { return }
+                let url = inputURL.standardizedFileURL
+                guard visited.insert(url).inserted,
+                      url.lastPathComponent.uppercased() != "DICOMDIR" else { return }
+                if !explicit && !["dcm", "dicom", ""].contains(url.pathExtension.lowercased()) { return }
+                if let context = self.quickParse(url) {
+                    contexts.append(context)
+                } else if let derived = DICOMDerivedObjectParser.parse(url: url) {
+                    derivedObjects.append(derived)
+                    if let annotation = DICOMAnnotationObjectParser.parse(url: url, kind: derived.kind) {
+                        annotationObjects.append(annotation)
                     }
-                    
-                    // Continuous Update (Every 100 files for faster feedback)
-                    counter += 1
-                    if counter % 100 == 0 {
-                        updateUI(isFinal: false)
-                    }
-                } else if let derivedObject = DICOMDerivedObjectParser.parse(url: fileURL) {
-                    derivedObjects.append(derivedObject)
-                    if let annotationObject = DICOMAnnotationObjectParser.parse(url: fileURL, kind: derivedObject.kind) {
-                        annotationObjects.append(annotationObject)
-                    }
-                    counter += 1
-                    if counter % 100 == 0 {
-                        updateUI(isFinal: false)
-                    }
+                } else { return }
+                let count = contexts.count + derivedObjects.count
+                if !publishedFirstResult || count % 100 == 0 {
+                    publishedFirstResult = true
+                    updateUI(isFinal: false)
                 }
             }
-            
-            // Final Update
+
+            // Explicit files are always processed before directory enumeration,
+            // including extensionless files and selections spread across folders.
+            for file in explicitFiles {
+                guard !operation.isCancelled else { return }
+                process(file, explicit: true)
+            }
+            for root in roots {
+                guard !operation.isCancelled else { return }
+                guard let enumerator = FileManager.default.enumerator(at: root,
+                        includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey], options: [.skipsHiddenFiles]) else { continue }
+                for case let file as URL in enumerator {
+                    guard !operation.isCancelled else { return }
+                    let properties = try? file.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+                    guard properties?.isDirectory != true, properties?.isRegularFile == true else { continue }
+                    process(file)
+                }
+            }
             updateUI(isFinal: true)
-            let fileCount = contexts.count
-            let seriesCount = Dictionary(grouping: contexts, by: { $0.seriesUID }).count
-            BenchmarkLogger.shared.stop("scan_directory", dataset: benchDataset, detail: "\(fileCount) files, \(seriesCount) series")
+            guard !operation.isCancelled else { return }
+            BenchmarkLogger.shared.stop("scan_directory", dataset: benchDataset,
+                                        detail: "\(contexts.count) files, \(Set(contexts.map(\.seriesGroupingKey)).count) series")
             BenchmarkLogger.shared.stop("load_total", dataset: benchDataset, detail: "Scan complete")
+        }
+        scanQueue.addOperation(operation)
+    }
 
-            // Auto-assign series to panels when in multi-panel mode
-            if self.panels.count > 1 {
-                DispatchQueue.main.async {
-                    self.autoAssignSeriesToPanels()
+    /// Remap indices by stable file identity whenever incremental sorting inserts
+    /// new series or slices before a panel's selection.
+    private func applyScanSnapshot(_ seriesList: [DicomSeries], derivedObjects: [DICOMDerivedObjectSummary],
+                                   annotationObjects: [DICOMAnnotationObject], explicitFiles: [URL], isFinal: Bool) {
+        let selections = panels.map { panel in
+            (panel, allSeries[safe: panel.seriesIndex]?.id, currentImageContext(for: panel)?.url)
+        }
+        allSeries = seriesList
+        self.derivedObjects = derivedObjects
+        self.annotationObjects = annotationObjects
+        for (panel, seriesID, imageURL) in selections {
+            guard let seriesID, let imageURL,
+                  let seriesIndex = allSeries.firstIndex(where: { $0.id == seriesID }),
+                  let imageIndex = allSeries[seriesIndex].images.firstIndex(where: { $0.url == imageURL }) else { continue }
+            panel.seriesIndex = seriesIndex
+            panel.imageIndex = imageIndex
+            updatePanelInfoStrings(panel)
+        }
+
+        if let panel = activePanel, currentImageContext(for: panel) == nil, !allSeries.isEmpty {
+            let explicitSelection = explicitFiles.lazy.compactMap { url -> (Int, Int)? in
+                for (seriesIndex, series) in self.allSeries.enumerated() {
+                    if let imageIndex = series.images.firstIndex(where: { $0.url == url }) {
+                        return (seriesIndex, imageIndex)
+                    }
                 }
+                return nil
+            }.first
+            let (seriesIndex, imageIndex) = explicitSelection ?? (0, 0)
+            panel.seriesIndex = seriesIndex
+            panel.imageIndex = imageIndex
+            loadFileForPanel(panel, imageContext: allSeries[seriesIndex].images[imageIndex])
+            updatePanelInfoStrings(panel)
+        }
+        if let panel = activePanel {
+            currentImageIndex = panel.imageIndex
+            currentSeriesIndex = panel.seriesIndex
+            updateInfoStrings()
+        }
+        refreshImportedOverlaysForAllPanels()
+        if !allSeries.isEmpty || !derivedObjects.isEmpty { isLoading = false }
+        if isFinal {
+            isScanning = false
+            isLoading = false
+            for series in allSeries where seriesThumbnailStates[series.id] != nil {
+                requestSeriesThumbnail(for: series)
             }
+            if allSeries.isEmpty && derivedObjects.isEmpty {
+                errorMessage = "No DICOM series found."
+                activePanel?.errorMessage = errorMessage
+            }
+            if CommandLine.arguments.contains("--select-first-derived"), selectedDerivedObjectID == nil,
+               let first = derivedObjects.first { inspectDerivedObject(first) }
+            // Leave every established panel selection intact, including choices
+            // the user made while scanning. Only fill unassigned panels.
+            for (index, panel) in panels.enumerated() where panel.seriesIndex < 0 && allSeries.indices.contains(index) {
+                assignSeriesToPanel(panel, seriesIndex: index)
+            }
+            startSeriesCaching(seriesIndex: currentSeriesIndex)
         }
     }
 
@@ -2564,7 +2404,11 @@ class DICOMModel: ObservableObject {
         imageCacheParams.removeAll()
         imagePixelMeta.removeAll()
         imageCacheParamsLock.unlock()
+        thumbnailQueue.cancelAllOperations()
+        thumbnailOperations.removeAll()
+        thumbnailRequests.removeAll()
         seriesThumbnails.removeAll()
+        seriesThumbnailStates.removeAll()
     }
 
     /// Auto-assign series to panels (one series per panel, in order)
@@ -3007,12 +2851,19 @@ class DICOMModel: ObservableObject {
 
     /// Load image into a specific panel (uses shared caches)
     func loadSingleFileForPanel(_ url: URL, panel: PanelState) {
+        let imageRequestID = UUID()
+        panelImageRequestIDs[panel.id] = imageRequestID
+        let sessionID = currentLoadRequestID
+        panel.loadingQueue.cancelAllOperations()
         // Early check: reject encapsulated PDF (not a displayable image)
         if let headerData = try? Data(contentsOf: url, options: [.mappedIfSafe]),
            let (elements, _, _) = try? SimpleDicomParser(data: headerData).parse(stopAtPixelData: true) {
             let sopClass = elements.first(where: { $0.tag == DicomTag(group: 0x0008, element: 0x0016) })?.stringValue?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if sopClass == "1.2.840.10008.5.1.4.1.1.104.1" || sopClass == "1.2.840.10008.5.1.4.1.1.104.2" {
+                panel.image = nil
+                panel.rawPixelData = nil
+                panel.dcmtkImage = nil
                 panel.errorMessage = "This file contains an encapsulated PDF, not a displayable image."
                 panel.isLoading = false
                 return
@@ -3058,6 +2909,8 @@ class DICOMModel: ObservableObject {
                     self.imageCache.removeObject(forKey: url as NSURL)
                 } else {
                     DispatchQueue.main.async {
+                    guard self.currentLoadRequestID == sessionID,
+                          self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
                     panel.rawPixelData = cachedRaw
                     panel.dcmtkImage = cachedDCMTK  // clear stale DCMTK if not cached
 
@@ -3130,6 +2983,7 @@ class DICOMModel: ObservableObject {
                     }
 
                     panel.isLoading = false
+                    panel.errorMessage = nil
                     self.objectWillChange.send()
                     self.updatePanelInfoStrings(panel)
                 }
@@ -3145,6 +2999,8 @@ class DICOMModel: ObservableObject {
                 let parser = SimpleDicomParser(data: data)
                 let (elements, _, _) = try parser.parse(stopAtPixelData: true)
                 DispatchQueue.main.async {
+                    guard self.currentLoadRequestID == sessionID,
+                          self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
                     panel.tags = elements
                 }
             } catch {
@@ -3160,6 +3016,11 @@ class DICOMModel: ObservableObject {
 
                 guard let rawData = dcmObj.getRawDataWidth(&width, height: &height, bitDepth: &depth, samples: &samples, isSigned: &isSigned) else {
                     DispatchQueue.main.async {
+                        guard self.currentLoadRequestID == sessionID,
+                              self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
+                        panel.image = nil
+                        panel.rawPixelData = nil
+                        panel.dcmtkImage = nil
                         panel.errorMessage = "Failed to get raw data"
                         panel.isLoading = false
                     }
@@ -3184,6 +3045,8 @@ class DICOMModel: ObservableObject {
                     self.rawDataCache.setObject(rawData as NSData, forKey: url as NSURL)
 
                     DispatchQueue.main.async {
+                        guard self.currentLoadRequestID == sessionID,
+                              self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
                         panel.dcmtkImage = dcmObj
                         panel.rawPixelData = rawData
                         panel.imageWidth = width
@@ -3232,12 +3095,18 @@ class DICOMModel: ObservableObject {
 
                         self.computeHistogramForPanel(data: rawData, isSigned: isSigned.boolValue, bits: depth, panel: panel)
                         panel.isLoading = false
+                        panel.errorMessage = nil
                         // Trigger cross-reference overlay updates on other panels
                         self.objectWillChange.send()
                         self.updatePanelInfoStrings(panel)
                     }
                 } else {
                     DispatchQueue.main.async {
+                        guard self.currentLoadRequestID == sessionID,
+                              self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
+                        panel.image = nil
+                        panel.rawPixelData = nil
+                        panel.dcmtkImage = nil
                         panel.errorMessage = "Failed to render image"
                         panel.isLoading = false
                     }
@@ -3256,6 +3125,8 @@ class DICOMModel: ObservableObject {
                     self.imageCacheParamsLock.unlock()
 
                     DispatchQueue.main.async {
+                        guard self.currentLoadRequestID == sessionID,
+                              self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
                         panel.dcmtkImage = nil  // DCMTK failed; clear stale object
                         panel.rawPixelData = j2kData
                         panel.imageWidth = j2kW
@@ -3301,6 +3172,7 @@ class DICOMModel: ObservableObject {
 
                         self.computeHistogramForPanel(data: j2kData, isSigned: j2kSigned.boolValue, bits: j2kD, panel: panel)
                         panel.isLoading = false
+                        panel.errorMessage = nil
                         self.updatePanelInfoStrings(panel)
                     }
                 } else {
@@ -3324,6 +3196,8 @@ class DICOMModel: ObservableObject {
                         self.imageCacheParamsLock.unlock()
 
                         DispatchQueue.main.async {
+                            guard self.currentLoadRequestID == sessionID,
+                                  self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
                             panel.dcmtkImage = nil  // DCMTK failed; clear stale object
                             panel.rawPixelData = rawData
                             panel.imageWidth = rawW
@@ -3369,11 +3243,17 @@ class DICOMModel: ObservableObject {
 
                             self.computeHistogramForPanel(data: rawData, isSigned: rawSigned, bits: rawD, panel: panel)
                             panel.isLoading = false
+                            panel.errorMessage = nil
                             self.updatePanelInfoStrings(panel)
                         }
                     } else {
                         let errorDetail = DCMTKHelper.lastError(forPath: url.path) ?? "Unknown error"
                         DispatchQueue.main.async {
+                            guard self.currentLoadRequestID == sessionID,
+                                  self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
+                            panel.image = nil
+                            panel.rawPixelData = nil
+                            panel.dcmtkImage = nil
                             panel.errorMessage = "Failed to load: \(errorDetail)"
                             panel.isLoading = false
                         }
@@ -3452,6 +3332,7 @@ class DICOMModel: ObservableObject {
 
     /// Auto W/L for a specific panel
     func autoWindowLevelForPanel(_ panel: PanelState) {
+        guard panel.samples == 1 else { return }
         if let data = panel.rawPixelData {
             let (minVal, maxVal) = computeMinMax(data: data, isSigned: panel.isSigned, bits: panel.bitDepth)
             let newWW = maxVal - minVal
@@ -3532,7 +3413,7 @@ class DICOMModel: ObservableObject {
 
     /// Auto W/L from a rectangular ROI in pixel coordinates
     func autoWindowLevelForPanelROI(_ panel: PanelState, rect: CGRect) {
-        guard let data = panel.rawPixelData, panel.imageWidth > 0 else { return }
+        guard panel.samples == 1, let data = panel.rawPixelData, panel.imageWidth > 0 else { return }
         let scaleX = panel.displayImageWidth > 0 ? CGFloat(panel.imageWidth) / panel.displayImageWidth : 1.0
         let scaleY = panel.displayImageHeight > 0 ? CGFloat(panel.imageHeight) / panel.displayImageHeight : 1.0
         let rawRect = CGRect(x: rect.minX * scaleX, y: rect.minY * scaleY,
@@ -3545,7 +3426,7 @@ class DICOMModel: ObservableObject {
 
     /// Compute HU statistics for a pixel-coordinate rectangle on a panel
     func computeROIStats(panel: PanelState, rect: CGRect) -> (mean: Double, max: Double, min: Double, stdDev: Double, count: Int)? {
-        guard let data = panel.rawPixelData else { return nil }
+        guard panel.samples == 1, let data = panel.rawPixelData else { return nil }
         let w = panel.imageWidth
         let h = panel.imageHeight
         // Scale ROI rect from display-image space to raw-pixel space
@@ -3781,10 +3662,12 @@ class DICOMModel: ObservableObject {
     /// Compute histogram for a panel
     private func computeHistogramForPanel(data: Data, isSigned: Bool, bits: Int, panel: PanelState) {
         // Skip histogram for RGB images — W/L doesn't apply
-        if panel.samples == 3 {
-            DispatchQueue.main.async { panel.histogramData = [] }
+        guard panel.samples == 1 else {
+            panel.histogramData = []
             return
         }
+        let sessionID = currentLoadRequestID
+        let imageRequestID = panelImageRequestIDs[panel.id]
         DispatchQueue.global(qos: .userInitiated).async { [weak panel] in
             guard let panel = panel else { return }
             var bins = [Int](repeating: 0, count: 256)
@@ -3830,6 +3713,8 @@ class DICOMModel: ObservableObject {
             let normalized = maxLog > 0 ? logBins.map { $0 / maxLog } : logBins
 
             DispatchQueue.main.async {
+                guard self.currentLoadRequestID == sessionID,
+                      self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
                 panel.histogramData = normalized
                 panel.minPixelValue = minVal
                 panel.maxPixelValue = maxVal
@@ -4282,6 +4167,11 @@ class DICOMModel: ObservableObject {
     /// Set up multi-frame decoding for a panel
     func setupMultiFrameForPanel(_ panel: PanelState, imageContext: DicomImageContext) {
         let url = imageContext.url
+        let imageRequestID = UUID()
+        panelImageRequestIDs[panel.id] = imageRequestID
+        let sessionID = currentLoadRequestID
+        panel.loadingQueue.cancelAllOperations()
+        panel.errorMessage = nil
         let setupStart = CFAbsoluteTimeGetCurrent()
         cineLog("setupMultiFrameForPanel: \(url.lastPathComponent) (\(imageContext.numberOfFrames) frames)")
 
@@ -4295,13 +4185,8 @@ class DICOMModel: ObservableObject {
             return
         }
 
-        // Prevent duplicate decoder creation (two code paths can race)
+        // Track background decoder creation for diagnostics.
         decoderLock.lock()
-        if decodersInFlight.contains(url) {
-            decoderLock.unlock()
-            cineLog("Decoder already in-flight for \(url.lastPathComponent), skipping")
-            return
-        }
         decodersInFlight.insert(url)
         decoderLock.unlock()
 
@@ -4313,7 +4198,12 @@ class DICOMModel: ObservableObject {
             let decoderStart = CFAbsoluteTimeGetCurrent()
             guard let decoder = MultiFrameDecoder(url: url) else {
                 cineLog("MultiFrameDecoder FAILED for \(url.lastPathComponent)")
+                self.decoderLock.lock()
+                self.decodersInFlight.remove(url)
+                self.decoderLock.unlock()
                 DispatchQueue.main.async {
+                    guard self.currentLoadRequestID == sessionID,
+                          self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
                     // Fallback to single-file loading if decoder fails
                     panel.isLoading = false
                     self.loadSingleFileForPanel(url, panel: panel)
@@ -4324,7 +4214,12 @@ class DICOMModel: ObservableObject {
             let decoderElapsed = CFAbsoluteTimeGetCurrent() - decoderStart
             cineLog("MultiFrameDecoder init took \(String(format: "%.3f", decoderElapsed))s for \(url.lastPathComponent) (\(decoder.effectiveFrameCount) frames found)")
 
+            self.decoderLock.lock()
+            self.decodersInFlight.remove(url)
+            self.decoderLock.unlock()
             DispatchQueue.main.async {
+                guard self.currentLoadRequestID == sessionID,
+                      self.panelImageRequestIDs[panel.id] == imageRequestID else { return }
                 let totalElapsed = CFAbsoluteTimeGetCurrent() - setupStart
                 cineLog("Total setup time: \(String(format: "%.3f", totalElapsed))s for \(url.lastPathComponent)")
                 // Evict other decoders to limit memory (keep only current file)
@@ -4382,11 +4277,16 @@ class DICOMModel: ObservableObject {
         panel.currentFrameIndex = clamped
         updatePanelInfoStrings(panel)
 
+        let sessionID = currentLoadRequestID
+        let imageRequestID = panelImageRequestIDs[panel.id]
+        guard let decoder = decoderForPanel(panel) else { return }
         DispatchQueue.global(qos: .userInitiated).async { [weak self, weak panel] in
             guard let self = self, let panel = panel else { return }
-            guard let decoder = self.decoderForPanel(panel) else { return }
             if let image = decoder.frameImage(at: clamped) {
                 DispatchQueue.main.async {
+                    guard self.currentLoadRequestID == sessionID,
+                          self.panelImageRequestIDs[panel.id] == imageRequestID,
+                          panel.isMultiFrame, panel.currentFrameIndex == clamped else { return }
                     panel.setDisplayImage(image)
                 }
             }

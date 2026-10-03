@@ -25,6 +25,7 @@ enum VolumeBuilderError: Error, CustomStringConvertible {
     case inconsistentOrientation
     case nonUniformSpacing(maxDeviation: Double)
     case memoryLimitExceeded(requiredMB: Int)
+    case unsupportedColorImages
 
     var description: String {
         switch self {
@@ -35,6 +36,7 @@ enum VolumeBuilderError: Error, CustomStringConvertible {
         case .inconsistentOrientation: return "Images have different orientations"
         case .nonUniformSpacing(let dev): return "Non-uniform slice spacing (max deviation: \(String(format: "%.1f", dev))%)"
         case .memoryLimitExceeded(let mb): return "Volume exceeds memory limit (\(mb) MB)"
+        case .unsupportedColorImages: return "MPR requires monochrome images; color images contain display RGB values"
         }
     }
 }
@@ -84,8 +86,13 @@ struct VolumeBuilder {
         var firstW = 0, firstH = 0
         var dimsFound = false
         for (img, _) in sorted {
-            if let (w, h, _, _) = try? loadImageDimensions(img, rawDataCache: rawDataCache, dcmtkCache: dcmtkCache) {
+            do {
+                let (w, h, _, _) = try loadImageDimensions(img, rawDataCache: rawDataCache, dcmtkCache: dcmtkCache)
                 firstW = w; firstH = h; dimsFound = true; break
+            } catch VolumeBuilderError.unsupportedColorImages {
+                throw VolumeBuilderError.unsupportedColorImages
+            } catch {
+                continue
             }
         }
         guard dimsFound, firstW > 0, firstH > 0 else {
@@ -112,6 +119,13 @@ struct VolumeBuilder {
         // Allocate contiguous buffer
         let buffer = UnsafeMutableBufferPointer<Int16>.allocate(capacity: firstW * firstH * depth)
         buffer.initialize(repeating: 0)
+        var transferredBuffer = false
+        defer {
+            if !transferredBuffer {
+                buffer.deinitialize()
+                buffer.deallocate()
+            }
+        }
 
         let sliceStride = firstW * firstH
 
@@ -132,7 +146,7 @@ struct VolumeBuilder {
         for (sliceIdx, (img, _)) in sorted.enumerated() {
             progress?(Double(sliceIdx) / Double(depth))
 
-            guard let info = loadRawDataWithInfo(img, rawDataCache: rawDataCache, dcmtkCache: dcmtkCache) else {
+            guard let info = try loadRawDataWithInfo(img, rawDataCache: rawDataCache, dcmtkCache: dcmtkCache) else {
                 // Zero-fill this slice (already initialized to 0)
                 continue
             }
@@ -153,6 +167,7 @@ struct VolumeBuilder {
 
         guard let origin = sorted[0].0.imagePosition else { throw VolumeBuilderError.missingSpatialMetadata }
 
+        transferredBuffer = true
         return VolumeData(
             voxels: buffer,
             width: firstW,
@@ -182,6 +197,7 @@ struct VolumeBuilder {
             var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
             var signed: ObjCBool = false
             if dcmObj.getRawDataWidth(&w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) != nil {
+                guard s == 1 else { throw VolumeBuilderError.unsupportedColorImages }
                 return (w, h, d, signed.boolValue)
             }
         }
@@ -189,6 +205,7 @@ struct VolumeBuilder {
         var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
         var signed: ObjCBool = false
         if let raw = DCMTKHelper.decodeJPEG2000DICOM(img.url.path, width: &w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) {
+            guard s == 1 else { throw VolumeBuilderError.unsupportedColorImages }
             rawDataCache.setObject(raw as NSData, forKey: img.url as NSURL)
             return (w, h, d, signed.boolValue)
         }
@@ -200,7 +217,7 @@ struct VolumeBuilder {
         _ img: DicomImageContext,
         rawDataCache: NSCache<NSURL, NSData>,
         dcmtkCache: NSCache<NSURL, DCMTKImageObject>
-    ) -> (data: Data, bits: Int, isSigned: Bool)? {
+    ) throws -> (data: Data, bits: Int, isSigned: Bool)? {
         // Try cached raw data first
         if let cached = rawDataCache.object(forKey: img.url as NSURL) {
             // Need dimensions — try DCMTK or JPEG 2000
@@ -208,6 +225,7 @@ struct VolumeBuilder {
                 var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
                 var signed: ObjCBool = false
                 if dcmObj.getRawDataWidth(&w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) != nil {
+                    guard s == 1 else { throw VolumeBuilderError.unsupportedColorImages }
                     return (cached as Data, d, signed.boolValue)
                 }
             }
@@ -217,6 +235,7 @@ struct VolumeBuilder {
             var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
             var signed: ObjCBool = false
             if let raw = dcmObj.getRawDataWidth(&w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) {
+                guard s == 1 else { throw VolumeBuilderError.unsupportedColorImages }
                 rawDataCache.setObject(raw as NSData, forKey: img.url as NSURL)
                 dcmtkCache.setObject(dcmObj, forKey: img.url as NSURL)
                 return (raw as Data, d, signed.boolValue)
@@ -226,6 +245,7 @@ struct VolumeBuilder {
         var w: Int = 0, h: Int = 0, d: Int = 0, s: Int = 0
         var signed: ObjCBool = false
         if let raw = DCMTKHelper.decodeJPEG2000DICOM(img.url.path, width: &w, height: &h, bitDepth: &d, samples: &s, isSigned: &signed) {
+            guard s == 1 else { throw VolumeBuilderError.unsupportedColorImages }
             rawDataCache.setObject(raw as NSData, forKey: img.url as NSURL)
             return (raw as Data, d, signed.boolValue)
         }
