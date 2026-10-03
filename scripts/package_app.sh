@@ -169,6 +169,9 @@ hdiutil create -volname "${APP_NAME}" \
 rm -rf "${DMG_TEMP}"
 
 if $NOTARIZE; then
+    echo "Code signing ${DMG_NAME}..."
+    codesign --force --sign "${SIGNING_IDENTITY}" "${DMG_NAME}"
+
     echo "Submitting ${DMG_NAME} for notarization..."
     xcrun notarytool submit "${DMG_NAME}" \
         --keychain-profile "${NOTARY_PROFILE}" \
