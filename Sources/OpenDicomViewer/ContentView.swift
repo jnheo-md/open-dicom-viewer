@@ -30,6 +30,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(model: model, columnVisibility: $columnVisibility)
+            .frame(minWidth: 250)
             .navigationSplitViewColumnWidth(min: 250, ideal: 300)
             .toolbar(removing: .sidebarToggle)
         } detail: {
@@ -42,10 +43,6 @@ struct ContentView: View {
                 ZStack(alignment: .topLeading) {
                     // Multi-panel container replaces old single DetailView
                     MultiPanelContainer(model: model, isFocused: $isFocused)
-                        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-                            _ = handleDrop(providers: providers)
-                            return true
-                        }
                         .onTapGesture {
                             isFocused = true
                         }
@@ -99,6 +96,7 @@ struct ContentView: View {
                 }
             }
         }
+        .onDrop(of: [.fileURL], isTargeted: nil, perform: handleDrop)
         // Keyboard Handlers — route through active panel
         .focusable()
         .focused($isFocused)
@@ -198,17 +196,34 @@ struct ContentView: View {
     // MARK: - Handlers
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        for provider in providers {
-            if provider.canLoadObject(ofClass: URL.self) {
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    if let url = url {
-                        DispatchQueue.main.async { model.load(url: url) }
+        let fileProviders = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+        guard !fileProviders.isEmpty else { return false }
+        Task { @MainActor in
+            var urls: [URL] = []
+            // Keep Finder's selection order even if providers finish out of order.
+            for provider in fileProviders {
+                let url: URL? = await withCheckedContinuation { continuation in
+                    provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                        let url: URL?
+                        if let value = item as? URL {
+                            url = value
+                        } else if let data = item as? Data {
+                            url = URL(dataRepresentation: data, relativeTo: nil)
+                        } else if let value = item as? String {
+                            url = URL(string: value)
+                        } else {
+                            url = nil
+                        }
+                        continuation.resume(returning: url)
                     }
                 }
-                return true
+                if let url, url.isFileURL { urls.append(url) }
             }
+            if !urls.isEmpty { model.load(urls: urls) }
         }
-        return false
+        return true
     }
 
     private func cyclePanelForward() {
@@ -242,12 +257,15 @@ struct SidebarView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "folder")
                         Text("Open")
+                            .fixedSize()
                     }
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Open DICOM Folder")
+                .help("Open DICOM Files or Folders")
+
+                RecentOpenMenu(history: model.recentHistory, open: model.load(urls:), compact: true)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -361,7 +379,7 @@ struct SeriesListView: View {
                      ContentUnavailableView {
                          Label("No Series Found", systemImage: "folder.badge.questionmark")
                      } description: {
-                         Text("Drag a FOLDER to this window to scan for all series.")
+                         Text("Drop DICOM files or folders here, or use Open to browse. Opening a file also lists its folder and subfolders.")
                      }
                  }
              }
@@ -418,23 +436,7 @@ struct SeriesRow: View {
 
     var body: some View {
         HStack {
-            Group {
-                if let thumb = model.seriesThumbnails[series.id] {
-                    Image(nsImage: thumb)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 40, height: 40)
-                        .cornerRadius(4)
-                } else {
-                    Image(systemName: "folder")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 40, height: 40)
-                        .onAppear {
-                            model.requestSeriesThumbnail(for: series)
-                        }
-                }
-            }
+            thumbnail
             VStack(alignment: .leading) {
                 Text("Series \(series.seriesNumber)")
                     .font(.headline)
@@ -452,6 +454,57 @@ struct SeriesRow: View {
                 PanelPositionIndicator(model: model, seriesIndex: seriesIndex)
             }
         }
+    }
+
+    private var thumbnail: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.6))
+
+            if let image = model.seriesThumbnails[series.id] {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .overlay(alignment: .bottomTrailing) {
+                        if model.seriesThumbnailStates[series.id] == .loading {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .padding(3)
+                                .background(.black.opacity(0.7), in: Circle())
+                                .accessibilityLabel("Updating series thumbnail")
+                        } else if model.seriesThumbnailStates[series.id] == .failed {
+                            Button {
+                                model.requestSeriesThumbnail(for: series, retry: true)
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 10))
+                                    .padding(3)
+                                    .background(.black.opacity(0.7), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Thumbnail update failed. Click to retry.")
+                            .accessibilityLabel("Retry thumbnail for Series \(series.seriesNumber)")
+                        }
+                    }
+            } else if model.seriesThumbnailStates[series.id] == .failed {
+                Button {
+                    model.requestSeriesThumbnail(for: series, retry: true)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 40, height: 40)
+                }
+                .buttonStyle(.plain)
+                .help("Thumbnail unavailable. Click to retry.")
+                .accessibilityLabel("Retry thumbnail for Series \(series.seriesNumber)")
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Loading series thumbnail")
+            }
+        }
+        .frame(width: 40, height: 40)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .task(id: series.id) { model.requestSeriesThumbnail(for: series) }
     }
 }
 

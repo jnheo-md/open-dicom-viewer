@@ -37,8 +37,10 @@ struct HelpView: View {
 
                     // Opening Files
                     helpSection("Opening Files") {
-                        Text("Use **File > Open** (Cmd+O) or click the **Open** button in the sidebar to select a DICOM folder or file. You can also **drag and drop** a folder onto the viewer.")
-                        Text("The sidebar lists all series found in the opened folder. Click a series to display it in the active panel.")
+                        Text("Use **File > Open** (Cmd+O) or the sidebar **Open** button to select one or more DICOM files or folders. You can also drop them onto the viewer or its Dock icon. Each selection opens together in the same window.")
+                        Text("Opening a file displays that image and lists the series in its folder and all subfolders. Click a series to display it in the active panel.")
+                        Text("Series thumbnails show a spinner while loading. If a preview fails, click its retry arrow. Previews update after the folder scan completes.")
+                        Text("Use **File > Open Recent** or the clock beside Open to reopen a recent selection. History is saved between launches; **Clear Recent History** removes it.")
                     }
 
                     // Panel Layouts

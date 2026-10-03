@@ -16,7 +16,7 @@
 //
 // Supports standard DICOM transfer syntaxes including JPEG, JPEG-LS,
 // and JPEG 2000 (via OpenJPEG). Handles both 8-bit and 16-bit pixel data,
-// signed/unsigned, and Monochrome1/Monochrome2 photometric interpretations.
+// signed/unsigned, Monochrome1/Monochrome2, and RGB/YBR/palette color images.
 // Licensed under the MIT License. See LICENSE for details.
 
 #import "DCMTKHelper.h"
@@ -29,6 +29,7 @@
 #include "dcmtk/dcmdata/dcpxitem.h"    // DcmPixelItem
 #include "dcmtk/dcmdata/dcrledrg.h"    // RLE decoder registration
 #include "dcmtk/dcmimgle/dcmimage.h"
+#include "dcmtk/dcmimage/diregist.h" // Required registration for RGB, YBR and palette images
 #include "dcmtk/dcmjpeg/djdecode.h"    // JPEG decoder registration
 #include "dcmtk/dcmjpls/djdecode.h"    // JPEG-LS decoder registration
 
@@ -55,6 +56,75 @@ static void ensureDCMTKInitialized(void) {
     DcmRLEDecoderRegistration::registerCodecs();  // RLE Lossless
     // Note: JPEG2000 handled via OpenJPEG fallback (no dcmjp2k in DCMTK 3.6.8)
   });
+}
+
+// Monochrome buffers retain modality-transformed values (including signed HU)
+// for quantitative tools. Color buffers are packed 8-bit RGB for display.
+// DiColorPixel::getData() is an array of plane pointers, NOT a pixel buffer;
+// treating it like DiMonoPixel::getData() reads invalid memory.
+static NSData *copyPixelData(DicomImage *image, NSInteger *width,
+                            NSInteger *height, NSInteger *bitDepth,
+                            NSInteger *samples, BOOL *isSigned) {
+  if (!image || image->getStatus() != EIS_Normal)
+    return nil;
+
+  *width = image->getWidth();
+  *height = image->getHeight();
+  *samples = image->isMonochrome() ? 1 : 3;
+
+  if (!image->isMonochrome()) {
+    const unsigned long frameSize = image->getOutputDataSize(8);
+    const unsigned long frameCount = image->getFrameCount();
+    size_t totalSize;
+    if (frameSize == 0 || frameCount == 0 ||
+        __builtin_mul_overflow((size_t)frameSize, (size_t)frameCount, &totalSize))
+      return nil;
+
+    NSMutableData *data = [NSMutableData dataWithLength:totalSize];
+    uint8_t *destination = (uint8_t *)data.mutableBytes;
+    if (!destination)
+      return nil;
+    for (unsigned long frame = 0; frame < frameCount; ++frame) {
+      // DCMTK performs palette/YBR conversion and high-bit-depth scaling.
+      if (!image->getOutputData(destination + frame * frameSize, frameSize,
+                                8, frame, 0))
+        return nil;
+    }
+    *bitDepth = 8;
+    *isSigned = NO;
+    return data;
+  }
+
+  const DiPixel *interData = image->getInterData();
+  if (!interData || interData->getPlanes() != 1)
+    return nil;
+
+  const EP_Representation rep = interData->getRepresentation();
+  size_t elementSize;
+  switch (rep) {
+  case EPR_Uint8:
+  case EPR_Sint8:
+    elementSize = 1;
+    break;
+  case EPR_Uint16:
+  case EPR_Sint16:
+    elementSize = 2;
+    break;
+  case EPR_Uint32:
+  case EPR_Sint32:
+    elementSize = 4;
+    break;
+  default:
+    return nil;
+  }
+  *bitDepth = elementSize * 8;
+  *isSigned = (rep == EPR_Sint8 || rep == EPR_Sint16 || rep == EPR_Sint32);
+
+  size_t totalSize;
+  if (__builtin_mul_overflow((size_t)interData->getCount(), elementSize, &totalSize))
+    return nil;
+  const void *pixels = interData->getData();
+  return pixels ? [NSData dataWithBytes:pixels length:totalSize] : nil;
 }
 
 @implementation DCMTKHelper
@@ -144,59 +214,7 @@ static void ensureDCMTKInitialized(void) {
     return nil;
   }
 
-  *width = image->getWidth();
-  *height = image->getHeight();
-  *samples = image->isMonochrome() ? 1 : 3;
-
-  // Use getInterData() to get the pixel data AFTER Modality LUT but BEFORE VOI
-  // LUT. This gives us the "Rescaled" values (e.g. Hounsfield Units) which is
-  // what we want for W/L.
-  const DiPixel *interData = image->getInterData();
-  if (!interData) {
-    delete image;
-    return nil;
-  }
-
-  unsigned long count = interData->getCount();
-  EP_Representation rep = interData->getRepresentation();
-
-  size_t elementSize = 0;
-  switch (rep) {
-  case EPR_Uint8:
-  case EPR_Sint8:
-    elementSize = 1;
-    *bitDepth = 8;
-    break;
-  case EPR_Uint16:
-  case EPR_Sint16:
-    elementSize = 2;
-    *bitDepth = 16;
-    break;
-  case EPR_Uint32:
-  case EPR_Sint32:
-    elementSize = 4;
-    *bitDepth = 32;
-    break;
-  default:
-    delete image;
-    return nil;
-  }
-
-  *isSigned = (rep == EPR_Sint8 || rep == EPR_Sint16 || rep == EPR_Sint32);
-
-  unsigned long totalSize;
-  if (__builtin_mul_overflow(count, elementSize, &totalSize)) {
-    delete image;
-    return nil;
-  }
-
-  const void *pixelPtr = interData->getData();
-  if (!pixelPtr) {
-    delete image;
-    return nil;
-  }
-
-  NSData *data = [NSData dataWithBytes:pixelPtr length:totalSize];
+  NSData *data = copyPixelData(image, width, height, bitDepth, samples, isSigned);
 
   delete image;
   return data;
@@ -240,9 +258,18 @@ static void ensureDCMTKInitialized(void) {
     case EIS_InvalidImage:
       errorStr = @"Invalid image data";
       break;
-    case EIS_NotSupportedValue:
-      errorStr = @"Unsupported pixel value representation";
+    case EIS_NotSupportedValue: {
+      OFString photo;
+      Uint16 bits = 0, samples = 0;
+      DcmDataset *dataset = fileformat.getDataset();
+      dataset->findAndGetOFString(DCM_PhotometricInterpretation, photo);
+      dataset->findAndGetUint16(DCM_BitsAllocated, bits);
+      dataset->findAndGetUint16(DCM_SamplesPerPixel, samples);
+      errorStr = [NSString stringWithFormat:
+          @"Unsupported DICOM image attributes (photometric: %s, %u-bit, %u samples/pixel)",
+          photo.empty() ? "unspecified" : photo.c_str(), bits, samples];
       break;
+    }
     default:
       errorStr =
           [NSString stringWithFormat:@"DicomImage error (status: %d)",
@@ -608,6 +635,9 @@ static void opj_info_callback(const char *msg, void *client_data) {
 @end
 
 @implementation DCMTKImageObject {
+  // Cache entries are shared by background prefetch and UI rendering.
+  // DicomImage mutates its window/output buffer, including during raw color
+  // extraction, so public accessors serialize all access with @synchronized.
   DicomImage *_image;
 }
 
@@ -640,56 +670,58 @@ static void opj_info_callback(const char *msg, void *client_data) {
                            height:(NSInteger)height
                                ww:(double)ww
                                wc:(double)wc {
-  if (!_image)
+  @synchronized(self) {
+    if (!_image)
+      return nil;
+
+    // Set Window/Level
+    // Note: DicomImage::setWindow takes center, width
+    if (ww > 0) {
+      _image->setWindow(wc, ww);
+    }
+
+    // Output 8-bit for display
+    unsigned long size = _image->getOutputDataSize(8);
+    if (size == 0)
+      return nil;
+
+    uint8_t *buffer = (uint8_t *)malloc(size);
+    if (_image->getOutputData(buffer, size, 8)) {
+      CGColorSpaceRef colorSpace = _image->isMonochrome()
+                                       ? CGColorSpaceCreateDeviceGray()
+                                       : CGColorSpaceCreateDeviceRGB();
+
+      CFDataRef data = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault, buffer,
+                                                   size, kCFAllocatorMalloc);
+      CGDataProviderRef provider = CGDataProviderCreateWithCFData(data);
+
+      int samples = _image->isMonochrome() ? 1 : 3;
+      CGBitmapInfo bitmapInfo = kCGBitmapByteOrderDefault | kCGImageAlphaNone;
+
+      CGImageRef cgImage =
+          CGImageCreate(_image->getWidth(), _image->getHeight(), 8, 8 * samples,
+                        _image->getWidth() * samples, colorSpace, bitmapInfo,
+                        provider, NULL, false, kCGRenderingIntentDefault);
+
+      // Use actual image dimensions when caller passes 0
+      NSInteger finalWidth = (width > 0) ? width : (NSInteger)_image->getWidth();
+      NSInteger finalHeight = (height > 0) ? height : (NSInteger)_image->getHeight();
+
+      NSImage *nsImage =
+          [[NSImage alloc] initWithCGImage:cgImage
+                                      size:NSMakeSize(finalWidth, finalHeight)];
+
+      CGImageRelease(cgImage);
+      CGDataProviderRelease(provider);
+      CFRelease(data);
+      CGColorSpaceRelease(colorSpace);
+
+      return nsImage;
+    }
+
+    free(buffer);
     return nil;
-
-  // Set Window/Level
-  // Note: DicomImage::setWindow takes center, width
-  if (ww > 0) {
-    _image->setWindow(wc, ww);
   }
-
-  // Output 8-bit for display
-  unsigned long size = _image->getOutputDataSize(8);
-  if (size == 0)
-    return nil;
-
-  uint8_t *buffer = (uint8_t *)malloc(size);
-  if (_image->getOutputData(buffer, size, 8)) {
-    CGColorSpaceRef colorSpace = _image->isMonochrome()
-                                     ? CGColorSpaceCreateDeviceGray()
-                                     : CGColorSpaceCreateDeviceRGB();
-
-    CFDataRef data = CFDataCreateWithBytesNoCopy(kCFAllocatorDefault, buffer,
-                                                 size, kCFAllocatorMalloc);
-    CGDataProviderRef provider = CGDataProviderCreateWithCFData(data);
-
-    int samples = _image->isMonochrome() ? 1 : 3;
-    CGBitmapInfo bitmapInfo = kCGBitmapByteOrderDefault | kCGImageAlphaNone;
-
-    CGImageRef cgImage =
-        CGImageCreate(_image->getWidth(), _image->getHeight(), 8, 8 * samples,
-                      _image->getWidth() * samples, colorSpace, bitmapInfo,
-                      provider, NULL, false, kCGRenderingIntentDefault);
-
-    // Use actual image dimensions when caller passes 0
-    NSInteger finalWidth = (width > 0) ? width : (NSInteger)_image->getWidth();
-    NSInteger finalHeight = (height > 0) ? height : (NSInteger)_image->getHeight();
-
-    NSImage *nsImage =
-        [[NSImage alloc] initWithCGImage:cgImage
-                                    size:NSMakeSize(finalWidth, finalHeight)];
-
-    CGImageRelease(cgImage);
-    CGDataProviderRelease(provider);
-    CFRelease(data);
-    CGColorSpaceRelease(colorSpace);
-
-    return nsImage;
-  }
-
-  free(buffer);
-  return nil;
 }
 
 - (NSData *)getRawDataWidth:(NSInteger *)width
@@ -697,73 +729,36 @@ static void opj_info_callback(const char *msg, void *client_data) {
                    bitDepth:(NSInteger *)bitDepth
                     samples:(NSInteger *)samples
                    isSigned:(BOOL *)isSigned {
-  if (!_image)
-    return nil;
+  @synchronized(self) {
+    if (!_image)
+      return nil;
 
-  *width = _image->getWidth();
-  *height = _image->getHeight();
-  *samples = _image->isMonochrome() ? 1 : 3;
-
-  // Use getInterData() for raw values (after Modality LUT)
-  const DiPixel *interData = _image->getInterData();
-  if (!interData)
-    return nil;
-
-  unsigned long count = interData->getCount();
-  EP_Representation rep = interData->getRepresentation();
-
-  size_t elementSize = 0;
-  switch (rep) {
-  case EPR_Uint8:
-  case EPR_Sint8:
-    elementSize = 1;
-    *bitDepth = 8;
-    break;
-  case EPR_Uint16:
-  case EPR_Sint16:
-    elementSize = 2;
-    *bitDepth = 16;
-    break;
-  case EPR_Uint32:
-  case EPR_Sint32:
-    elementSize = 4;
-    *bitDepth = 32;
-    break;
-  default:
-    return nil;
+    return copyPixelData(_image, width, height, bitDepth, samples, isSigned);
   }
-
-  *isSigned = (rep == EPR_Sint8 || rep == EPR_Sint16 || rep == EPR_Sint32);
-
-  unsigned long totalSize;
-  if (__builtin_mul_overflow(count, elementSize, &totalSize))
-    return nil;
-
-  const void *pixelPtr = interData->getData();
-  if (!pixelPtr)
-    return nil;
-
-  return [NSData dataWithBytes:pixelPtr length:totalSize];
 }
 
 - (double)getWindowWidth {
-  if (!_image)
+  @synchronized(self) {
+    if (!_image)
+      return 0;
+    double c, w;
+    if (_image->getWindow(c, w)) {
+      return w;
+    }
     return 0;
-  double c, w;
-  if (_image->getWindow(c, w)) {
-    return w;
   }
-  return 0;
 }
 
 - (double)getWindowCenter {
-  if (!_image)
+  @synchronized(self) {
+    if (!_image)
+      return 0;
+    double c, w;
+    if (_image->getWindow(c, w)) {
+      return c;
+    }
     return 0;
-  double c, w;
-  if (_image->getWindow(c, w)) {
-    return c;
   }
-  return 0;
 }
 
 @end
